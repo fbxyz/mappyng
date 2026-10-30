@@ -44,6 +44,6 @@ docs/sg_execution_times.rst
 docs/examples/*.svg
 
 # Local working files
-examples/
-TODO.md
-docs/notes/
+/examples/
+/TODO.md
+/docs/notes/
