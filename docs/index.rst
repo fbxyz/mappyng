@@ -4,7 +4,7 @@ mappyng
 SVG-native cartographic visualization library.
 
 .. image:: _static/readme/choropleth.svg
-   :alt: Choropleth map of mortality from heart failure on a Natural Earth relief background
+   :alt: Choropleth map of mortality from heart failure
    :width: 48%
 
 .. image:: _static/readme/globe.svg

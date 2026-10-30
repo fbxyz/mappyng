@@ -4,8 +4,7 @@ Natural Earth I with shaded relief and water (public domain) is downloaded
 once, then warped to the CRS of each example and written as a compact
 GeoTIFF in ``docs/examples/data``:
 
-* ``relief_france_2154.tif``: mainland France, Lambert-93;
-* ``relief_globe_ortho.tif``: the orthographic globe of ``plot_13_globe.py``.
+``relief_globe_ortho.tif``: the orthographic globe of ``plot_13_globe.py``.
 
 Run from the repository root: ``python docs/make_rasters.py [NE1_LR_LC_SR_W_DR.tif]``.
 Without an argument, the 193 MB archive is fetched from naturalearthdata.com.
@@ -71,8 +70,5 @@ def warp(src_path: Path, crs, bounds, width, height, dst_path: Path) -> None:
 if __name__ == "__main__":
     tif = source(sys.argv[1] if len(sys.argv) > 1 else None)
     OUT.mkdir(parents=True, exist_ok=True)
-    # Mainland France frame (BBOX of the gallery) with a small margin.
-    warp(tif, CRS.from_epsg(2154), (60000, 6010000, 1310000, 7180000),
-         1000, 936, OUT / "relief_france_2154.tif")
     warp(tif, CRS.from_string(ORTHO), (-R, -R, R, R),
          1100, 1100, OUT / "relief_globe_ortho.tif")

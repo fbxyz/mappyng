@@ -8,7 +8,7 @@ file (or a standalone interactive HTML file). The SVG is the canonical
 source; PNG and PDF export is derived from it.
 
 <p align="center">
-  <img src="docs/_static/readme/choropleth.svg" alt="Choropleth map of French départements on a Natural Earth relief background, with overseas cartouches, title, scale bar and legend" width="400">
+  <img src="docs/_static/readme/choropleth.svg" alt="Choropleth map of French départements with overseas cartouches, title, scale bar and legend" width="400">
   <img src="docs/_static/readme/globe.svg" alt="The world as a globe, with a Natural Earth relief raster and air routes from Paris" width="400">
 </p>
 

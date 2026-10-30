@@ -42,9 +42,12 @@ m = (
            facecolor="#B9D9EB", border_radius=10,
            box_shadow={"dx": 3, "dy": 3, "blur": 6, "opacity": 0.2})
     + insets
-    # Natural Earth shaded relief (public domain) as the background, warped
-    # to Lambert-93 by docs/make_rasters.py, with France lifted by a shadow.
-    + mp.Raster(paths={"france": Path("data") / "relief_france_2154.tif"})
+    # Lighter water along the coasts of the European countries.
+    + mp.OceanGradient(europe)
+    # Meridians and parallels, under the land.
+    + mp.Graticule(step=2, stroke="#ffffff", opacity=0.9, stroke_width=0.7)
+    # European countries as background, with France lifted by a drop shadow.
+    + mp.Basemap()
     + mp.Vector(regions, stroke="#4d4d4d", stroke_width=0.1)
     + mp.DropShadow(europe, query="code_pays_iso3 == 'FRA'")
     + mp.Choropleth(
@@ -60,8 +63,7 @@ m = (
     # Scale bar over the sea, in the Gulf of Lion.
     + mp.ScaleBar(length=100000, label="100 km", position=(0.55, 0.855),
                   opacity=0.8)
-    + mp.Source("Source: Sante publique France (ODISSE) | "
-                "Relief: Natural Earth")
+    + mp.Source("Source: Sante publique France (ODISSE)")
     # Hover tooltips of the interactive export (m.render("map.html")).
     + mp.Tooltip(["LIB_GEO", "taux_mortalite"],
                  aliases={"LIB_GEO": "Department", "taux_mortalite": "Rate"})

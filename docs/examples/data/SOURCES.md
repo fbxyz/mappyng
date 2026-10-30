@@ -42,10 +42,9 @@ documentation build is reproducible and offline.
 - Source: data.gouv.fr, dataset "Helistations hospitalieres".
 - Licence: Creative Commons Attribution (CC-BY).
 
-## relief_france_2154.tif, relief_globe_ortho.tif
+## relief_globe_ortho.tif
 - Raster: Natural Earth I with Shaded Relief, Water, and Drainages
-  (`NE1_LR_LC_SR_W_DR`, 10m), warped to Lambert-93 (mainland France) and
-  to the orthographic projection of the globe example by
+  (`NE1_LR_LC_SR_W_DR`, 10m), warped to the orthographic projection of the globe example by
   `docs/make_rasters.py`.
 - Source: Natural Earth, https://www.naturalearthdata.com/
 - Licence: public domain.
