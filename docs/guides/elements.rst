@@ -122,31 +122,15 @@ See :doc:`situation`.
 Label
 -----
 
-:class:`~mappyng.Label` places names automatically, avoiding overlaps.
-See :doc:`labels`.
-
-.. mappyng-example::
-
-   m = (
-       mp.Map(europe, bbox=BBOX, width=420, height="auto", facecolor="#cfe0ee")
-       + mp.Basemap()
-       + mp.Vector(regions, fill="#f4f1ea", stroke="#999999", stroke_width=0.4)
-       + mp.Label(regions, column="LIB_GEO", font_size=8)
-   )
+:class:`~mappyng.Label` places names automatically, avoiding overlaps. See
+:doc:`labels` and the gallery example :doc:`/gallery/plot_05_labels`.
 
 Graticule
 ---------
 
-:class:`~mappyng.Graticule` draws meridians and parallels.
-
-.. mappyng-example::
-
-   m = (
-       mp.Map(europe.to_crs(3857), bbox=[-1400000, 4000000, 4700000, 11500000],
-              width=420, height="auto", facecolor="#cfe0ee")
-       + mp.Graticule(step=10.0, stroke="#7f98b0")
-       + mp.Basemap()
-   )
+:class:`~mappyng.Graticule` draws meridians and parallels. See the gallery
+example :doc:`/gallery/plot_06_graticule` (and :doc:`/gallery/plot_13_globe`
+for a globe).
 
 Title and Source
 ----------------
@@ -217,45 +201,17 @@ lightens the water along the coasts. See :doc:`layout`.
 Inset
 -----
 
-:class:`~mappyng.Inset` shows a distant area (here the overseas territories)
-in a cartouche; :class:`~mappyng.Insets` lays several of them out.
-
-.. mappyng-example::
-
-   OVERSEAS = {
-       "Guadeloupe": [-6890454, 1780151, -6799589, 1874186],
-       "Martinique": [-6826862, 1609607, -6759494, 1685367],
-       "Reunion": [6136383, -2448160, 6226316, -2366992],
-   }
-   insets = mp.Insets(
-       [mp.Inset(n, bbox=b, crs=3857) for n, b in OVERSEAS.items()],
-       spacing=10, title_size=7, border_radius=6, box_shadow=True)
-   m = (
-       mp.Map(europe, bbox=BBOX, width=420, height="auto", facecolor="#cfe0ee")
-       + insets
-       + mp.Basemap()
-       + mp.Vector(regions, fill="#f4f1ea", stroke="#888888", stroke_width=0.3)
-   )
+:class:`~mappyng.Inset` shows a distant area (the overseas territories) in a
+cartouche; :class:`~mappyng.Insets` lays several of them out. See
+:doc:`layout` and the gallery examples :doc:`/gallery/plot_02_choropleth`
+and :doc:`/gallery/plot_12_usa` (Alaska and Hawaii).
 
 Zoom
 ----
 
-:class:`~mappyng.Zoom` enlarges an area of the map in a box (here the Paris
-region). Thematic layers are redrawn in the box; plain ``Vector`` layers are
-not.
-
-.. mappyng-example::
-
-   df = pd.read_csv(DATA / "cardio_mortalite_dep.csv", dtype={"code_dep": str})
-   d = deps.merge(df, left_on="COD_GEO", right_on="code_dep", how="left")
-   m = (
-       mp.Map(europe, bbox=BBOX, width=420, height="auto", facecolor="#cfe0ee")
-       + mp.Zoom([586377, 6780533, 739396, 6904563], x=260, y=25,
-                 width=140, height=150, border_radius=8, box_shadow=True)
-       + mp.Basemap()
-       + mp.Choropleth(d, column="taux_mortalite", cmap="Reds", num_classes=5,
-                       stroke_width=0.15, legend=False)
-   )
+:class:`~mappyng.Zoom` enlarges an area of the map in a box. Thematic layers
+are redrawn in the box; plain ``Vector`` layers are not. See :doc:`layout` and
+the gallery example :doc:`/gallery/plot_04_situation` (Paris region).
 
 Tooltip
 -------
