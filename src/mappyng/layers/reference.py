@@ -165,6 +165,9 @@ class Raster(Layer):
         Draw on the zoom viewport (default True).
     on_cartouches : bool, optional
         Draw on cartouche viewports (default True).
+    z : int, optional
+        Stacking depth. By default the raster is drawn behind every other
+        layer; a larger value lifts it above lower layers.
     z_index : int, optional
         Render order among layers (default 0).
     visible : bool, optional
@@ -186,6 +189,7 @@ class Raster(Layer):
         opacity: Any = _UNSET,
         on_zoom: Any = _UNSET,
         on_cartouches: Any = _UNSET,
+        z: Any = _UNSET,
         z_index: int = 0,
         visible: bool = True,
     ) -> None:
@@ -193,7 +197,7 @@ class Raster(Layer):
             gdf, z_index=z_index, visible=visible,
             **collect_set(
                 paths=paths, opacity=opacity, on_zoom=on_zoom,
-                on_cartouches=on_cartouches,
+                on_cartouches=on_cartouches, z=z,
             ),
         )
 

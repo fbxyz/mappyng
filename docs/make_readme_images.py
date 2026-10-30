@@ -18,6 +18,7 @@ SOURCES = {
     "choropleth": "plot_02_choropleth.py",
     "proportional": "plot_03_proportional.py",
     "cartouches": "plot_08_layout.py",
+    "globe": "plot_13_globe.py",
 }
 
 OUT.mkdir(parents=True, exist_ok=True)

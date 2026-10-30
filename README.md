@@ -8,17 +8,18 @@ file (or a standalone interactive HTML file). The SVG is the canonical
 source; PNG and PDF export is derived from it.
 
 <p align="center">
-  <img src="docs/_static/readme/choropleth.svg" alt="Choropleth map of French départements with overseas cartouches, title, scale bar and legend" width="620">
+  <img src="docs/_static/readme/choropleth.svg" alt="Choropleth map of French départements on a Natural Earth relief background, with overseas cartouches, title, scale bar and legend" width="400">
+  <img src="docs/_static/readme/globe.svg" alt="The world as a globe, with a Natural Earth relief raster and air routes from Paris" width="400">
 </p>
 
 Documentation: https://fbxyz.github.io/mappyng/
 
 ## Gallery
 
-| Choropleth | Proportional symbols | Zoom and cartouches |
+| Globe | Proportional symbols | Zoom and cartouches |
 |:---:|:---:|:---:|
-| <img src="docs/_static/readme/choropleth.svg" alt="Choropleth" width="260"> | <img src="docs/_static/readme/proportional.svg" alt="Proportional symbols" width="260"> | <img src="docs/_static/readme/cartouches.svg" alt="Zoom window and cartouches" width="260"> |
-| `Choropleth` with overseas cartouches | `Proportional` circles sized by a count | `Zoom` on a dense area, `Insets` and shadow |
+| <img src="docs/_static/readme/globe.svg" alt="Globe" width="260"> | <img src="docs/_static/readme/proportional.svg" alt="Proportional symbols" width="260"> | <img src="docs/_static/readme/cartouches.svg" alt="Zoom window and cartouches" width="260"> |
+| `Raster` relief in an orthographic projection | `Proportional` circles sized by a count | `Zoom` on a dense area, `Insets` and shadow |
 
 The full gallery, with the code of every map, is in the
 [documentation](https://fbxyz.github.io/mappyng/); the README images are

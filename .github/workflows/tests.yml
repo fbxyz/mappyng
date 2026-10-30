@@ -63,7 +63,7 @@ jobs:
       - name: Install
         run: |
           python -m pip install --upgrade pip
-          python -m pip install ".[docs,tile]"
+          python -m pip install ".[docs,tile,raster]"
 
       # Executes the gallery examples, so a broken example fails the build.
       # Warnings are not errors yet: the build still has known docstring warnings.

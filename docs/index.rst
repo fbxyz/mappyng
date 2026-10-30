@@ -3,6 +3,14 @@ mappyng
 
 SVG-native cartographic visualization library.
 
+.. image:: _static/readme/choropleth.svg
+   :alt: Choropleth map of mortality from heart failure on a Natural Earth relief background
+   :width: 48%
+
+.. image:: _static/readme/globe.svg
+   :alt: The world as a globe, with a Natural Earth relief raster and air routes from Paris
+   :width: 48%
+
 .. toctree::
    :maxdepth: 2
    :caption: Guides
@@ -21,7 +29,6 @@ SVG-native cartographic visualization library.
    guides/detail
    guides/reproducibility
    guides/performance
-   guides/glossary
 
 .. toctree::
    :maxdepth: 2

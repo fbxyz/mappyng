@@ -31,7 +31,8 @@ Example
 from __future__ import annotations
 
 import base64
-import io
+import struct
+import zlib
 
 import numpy as np
 import rasterio
@@ -106,28 +107,34 @@ def _read_window_png(
 def _array_to_png(bands: np.ndarray) -> bytes:
     """Convert a (bands, h, w) uint8 array to PNG bytes.
 
-    Supports 3-band (RGB) and 4-band (RGBA) input.
-    Uses matplotlib's imsave for simplicity.
+    Supports 1-band (grayscale), 3-band (RGB) and 4-band (RGBA) input; any
+    other band count keeps the first three bands. The PNG is encoded with
+    :mod:`zlib` only, so no imaging library is needed.
     """
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-
-    if bands.shape[0] == 4:
-        img = np.transpose(bands, (1, 2, 0))  # (h, w, 4)
-    elif bands.shape[0] == 3:
-        img = np.transpose(bands, (1, 2, 0))  # (h, w, 3)
-    elif bands.shape[0] == 1:
-        # Grayscale to RGB
-        gray = bands[0]
-        img = np.stack([gray, gray, gray], axis=-1)
+    if bands.shape[0] == 1:
+        img = np.repeat(np.transpose(bands, (1, 2, 0)), 3, axis=2)
+    elif bands.shape[0] in (3, 4):
+        img = np.transpose(bands, (1, 2, 0))
     else:
         img = np.transpose(bands[:3], (1, 2, 0))
+    img = np.ascontiguousarray(img.astype(np.uint8))
+    height, width, channels = img.shape
+    color_type = 6 if channels == 4 else 2
 
-    buf = io.BytesIO()
-    plt.imsave(buf, img, format="png")
-    buf.seek(0)
-    return buf.read()
+    # One filter byte (0 = none) in front of every scanline.
+    raw = np.concatenate(
+        [np.zeros((height, 1), dtype=np.uint8), img.reshape(height, -1)],
+        axis=1,
+    ).tobytes()
+
+    def chunk(tag: bytes, data: bytes) -> bytes:
+        body = tag + data
+        return (struct.pack(">I", len(data)) + body
+                + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF))
+
+    ihdr = struct.pack(">IIBBBBB", width, height, 8, color_type, 0, 0, 0)
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", ihdr)
+            + chunk(b"IDAT", zlib.compress(raw, 6)) + chunk(b"IEND", b""))
 
 
 def _place_raster(
@@ -183,6 +190,7 @@ def add_raster(
     opacity: float = 1.0,
     on_zoom: bool = True,
     on_cartouches: bool = True,
+    z: int | None = None,
 ) -> None:
     """Add raster backgrounds to a Map.
 
@@ -207,8 +215,11 @@ def add_raster(
         Render on zoom viewport (default True).
     on_cartouches : bool
         Render on cartouche viewports (default True).
+    z : int, optional
+        Stacking depth. By default the raster is drawn behind every other
+        layer; a larger value lifts it above lower layers.
     """
-    z_order = D.Z_RASTER
+    z_order = D.Z_RASTER if z is None else z
 
     # Open all raster files
     datasets: dict[str, rasterio.DatasetReader] = {}

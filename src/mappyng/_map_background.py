@@ -408,6 +408,7 @@ class BackgroundMixin(MapBase):
             opacity=cfg.pop("opacity", 1.0),
             on_zoom=cfg.pop("on_zoom", True),
             on_cartouches=cfg.pop("on_cartouches", True),
+            z=cfg.pop("z", None),
         )
 
     def _get_main_crs(self):
