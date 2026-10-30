@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local working notes
+divers/
+
+# Generated outputs
+examples/*.svg
+examples/*.html
+examples/*.png
+sortie/
+
+# Sphinx build output
+docs/_build/
+
+# sphinx-gallery generated output (from docs/examples/)
+docs/gallery/
+docs/sg_execution_times.rst
+
+# SVG written by the gallery examples when run standalone
+docs/examples/*.svg
+
+# Local working files
+examples/
+TODO.md
+docs/notes/

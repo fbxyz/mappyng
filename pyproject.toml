@@ -1,0 +1,107 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mappyng"
+dynamic = ["version"]
+description = "SVG-native cartographic visualization library"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [{name = "fbxyz"}]
+requires-python = ">=3.10"
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Typing :: Typed",
+    "Topic :: Scientific/Engineering :: GIS",
+    "Topic :: Scientific/Engineering :: Visualization",
+]
+dependencies = [
+    "geopandas>=0.14",
+    "shapely>=2.0",
+    "numpy>=1.24",
+    "mapclassify>=2.6",
+    "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+raster = ["rasterio>=1.3"]
+tile = ["mercantile>=1.2", "Pillow>=9.0"]
+export = ["cairosvg>=2.5"]
+docs = [
+    "sphinx>=7.0",
+    "furo>=2024.1",
+    "sphinx-autodoc-typehints>=1.25",
+    "sphinx-copybutton>=0.5",
+    "sphinx-gallery>=0.15",
+    "pandas>=1.5",
+    "cairosvg>=2.5",
+]
+dev = [
+    "pytest>=7",
+    "jupyter",
+    "rasterio>=1.3",
+    "mercantile>=1.2",
+    "Pillow>=9.0",
+    "cairosvg>=2.5",
+    "ruff",
+    "mypy",
+    "types-PyYAML",
+]
+
+[project.urls]
+Homepage = "https://github.com/fbxyz/mappyng"
+Repository = "https://github.com/fbxyz/mappyng"
+Documentation = "https://fbxyz.github.io/mappyng/"
+
+[tool.setuptools.dynamic]
+version = {attr = "mappyng.__version__"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"mappyng.data" = ["*.geojson", "README.md"]
+"mappyng" = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-ra -q"
+
+[tool.ruff]
+target-version = "py310"
+src = ["src", "tests"]
+extend-exclude = ["docs/gallery", "docs/_build", "examples"]  # examples: scratch notebooks
+
+[tool.ruff.lint]
+# pycodestyle errors and warnings that are not about style, pyflakes,
+# flake8-bugbear, pyupgrade (modern annotations) and import sorting. Line length
+# is not enforced.
+select = ["E4", "E7", "E9", "F", "W", "B", "UP", "I"]
+ignore = [
+    "B028",  # warnings.warn without stacklevel: most are deliberate
+    "B905",  # zip() without strict=: the length mismatch is never an error here
+    "E741",  # ambiguous variable name
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["mappyng"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B011", "B017"]
+"docs/examples/*" = ["E402"]
+
+[tool.mypy]
+python_version = "3.10"
+files = ["src/mappyng"]
+ignore_missing_imports = true
+warn_unused_ignores = true
