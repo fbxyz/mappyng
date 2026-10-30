@@ -90,7 +90,8 @@ quantity. See :doc:`proportional`.
    m = (
        mp.Map(europe, bbox=BBOX, width=420, height="auto", facecolor="#cfe0ee")
        + mp.Basemap()
-       + mp.Vector(regions, fill="#f4f1ea", stroke="#999999", stroke_width=0.3)
+       + mp.Vector(deps, fill="#f4f1ea", stroke="#bbbbbb", stroke_width=0.3)
+       + mp.Vector(regions, stroke="#666666", stroke_width=0.6)
        + mp.Proportional(pts, column="exces_deces", fill="#d7301f",
                          fill_opacity=0.6, stroke="#7f0000",
                          legend=mp.Legend("Excess deaths"))

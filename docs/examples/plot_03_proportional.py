@@ -43,6 +43,8 @@ m = (
            box_shadow={"dx": 3, "dy": 3, "blur": 6, "opacity": 0.2})
     + insets
     + mp.Basemap()
+    # Department outlines (where the circles sit), under the region outlines.
+    + mp.Vector(deps, stroke="#9a9a9a", stroke_width=0.3)
     + mp.Vector(regions, stroke="#4d4d4d", stroke_width=0.2)
     + mp.DropShadow(europe, query="code_pays_iso3 == 'FRA'")
     + mp.Proportional(pts, column="exces_deces", fill="#d7301f",
