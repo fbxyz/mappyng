@@ -9,6 +9,7 @@ SVG-native cartographic visualization library.
 
    guides/installation
    guides/quickstart
+   guides/elements
    guides/choropleth
    guides/proportional
    guides/situation

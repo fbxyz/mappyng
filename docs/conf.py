@@ -2,6 +2,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.abspath("../src"))
+sys.path.insert(0, os.path.abspath("_ext"))
 
 from mappyng import __version__ as _mappyng_version
 
@@ -18,6 +19,7 @@ extensions = [
     "sphinx_autodoc_typehints",
     "sphinx_copybutton",
     "sphinx_gallery.gen_gallery",
+    "mappyng_example",
 ]
 
 
