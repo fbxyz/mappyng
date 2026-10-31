@@ -1,11 +1,13 @@
 Installation
 ============
 
-Install the latest version directly from the GitHub repository:
+Install from PyPI:
 
 .. code-block:: bash
 
-   pip install git+https://github.com/fbxyz/mappyng.git
+   pip install mappyng-svg
+
+The package is imported as ``mappyng`` (``import mappyng as mp``).
 
 Optional extras
 ---------------
@@ -13,12 +15,17 @@ Optional extras
 .. code-block:: bash
 
    # XYZ/raster basemap tiles (mercantile, Pillow)
-   pip install "mappyng[tile] @ git+https://github.com/fbxyz/mappyng.git"
+   pip install "mappyng-svg[tile]"
 
    # GeoTIFF raster backgrounds (rasterio)
-   pip install "mappyng[raster] @ git+https://github.com/fbxyz/mappyng.git"
+   pip install "mappyng-svg[raster]"
 
    # PNG/PDF export (cairosvg)
-   pip install "mappyng[export] @ git+https://github.com/fbxyz/mappyng.git"
+   pip install "mappyng-svg[export]"
 
-A PyPI release (``pip install mappyng``) is planned.
+Development version
+-------------------
+
+.. code-block:: bash
+
+   pip install git+https://github.com/fbxyz/mappyng.git
