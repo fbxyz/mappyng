@@ -39,6 +39,9 @@ from .legend import (
     draw_config_frame,
     estimate_text_width,
     legend_fonts,
+    make_legend_config,
+    record_legend,
+    stack_legend,
 )
 from .renderer import SvgViewport
 
@@ -537,9 +540,11 @@ def add_proportional(
         Data value that should map to *reference_radius* pixels.
         Allows consistent sizing across multiple maps.
     reference_radius : float, optional
-        Circle radius in SVG pixels for *reference_value*.
-    legend_params : dict, optional
+        Circle radius in SVG pixels for *reference_value*. Defaults to
+        *max_radius* when only *reference_value* is given.
+    legend_params : dict or False, optional
         Legend configuration (see ProportionalLegendConfig fields).
+        ``False`` draws no legend.
     on_zoom : bool
         Render on zoom viewport.
     on_cartouches : bool
@@ -584,12 +589,16 @@ def add_proportional(
     # letting each call rescale to the largest value it is given) keeps a value
     # at the same radius on the main map, the zoom, the cartouches and in the
     # legend, whatever subset of the data a viewport shows.
-    if reference_value is None or reference_radius is None:
+    if reference_value is None:
         reference_value = float(np.abs(values).max())
+        reference_radius = max_radius
+    elif reference_radius is None:
         reference_radius = max_radius
 
     # ---- Legend setup ----
-    legend_cfg = ProportionalLegendConfig(**(legend_params or {}))
+    show_legend = legend_params is not False
+    legend_cfg = make_legend_config(
+        ProportionalLegendConfig, legend_params, "Proportional legend")
     legend_cfg.resolve_defaults(map_obj.style, font_scale=getattr(map_obj, "font_scale", 1.0))
 
     legend_values = legend_cfg.values
@@ -663,11 +672,13 @@ def add_proportional(
                                stroke, stroke_width, z, layer_id, column)
 
     # Legend
+    stacked = show_legend and stack_legend(map_obj, legend_cfg)
     legend_bbox = _draw_proportional_legend(
         map_obj.svg, legend_cfg, legend_values, legend_radii,
         fill, map_obj.main,
-    )
+    ) if show_legend else None
     if legend_bbox is not None:
         map_obj.overflow.register(*legend_bbox)
+        record_legend(map_obj, stacked, legend_bbox)
 
     return layer_id

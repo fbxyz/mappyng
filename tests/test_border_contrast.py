@@ -65,8 +65,12 @@ class TestColourMaths:
         assert luminance("#000") == pytest.approx(luminance("black"))
 
     def test_unreadable_colour(self):
-        with pytest.raises(ValueError, match="cannot read"):
-            luminance("rgb(1,2,3)")
+        with pytest.raises(ValueError, match="(?i)cannot read"):
+            luminance("not-a-colour")
+
+    def test_css_colour_forms(self):
+        assert luminance("rgb(255, 255, 255)") == pytest.approx(luminance("white"))
+        assert luminance("darkred") == pytest.approx(luminance("#8b0000"))
 
 
 class TestFindWeakBorders:

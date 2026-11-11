@@ -30,6 +30,7 @@ Example
 import math
 import os
 import warnings
+import weakref
 from typing import TYPE_CHECKING, Any, cast
 
 import geopandas as gpd
@@ -374,9 +375,22 @@ class Map(BackgroundMixin, ChromeMixin):
             z_order=D.Z_BACKGROUND, fill=self._background,
         )
         self._cartouche_viewports = {}
+        # Bounds registered so far belong to the previous canvas.
+        self.overflow.clear()
+        self._state.legend_bottom = None
         self._build_main_viewport()
         if self.cartouche_params:
             self._build_cartouches()
+        # The zoom window and the gradients live in the document that was
+        # just replaced: create them again on the new one.
+        if self._zoom_params is not None:
+            zoom_params = self._zoom_params
+            self._zoom_viewport = None
+            self._add_zoom_viewport(zoom_params)
+        from .elements import RadialGradient
+        for item in self._items:
+            if isinstance(item, RadialGradient):
+                item._apply(self)
 
     # ------------------------------------------------------------------
     # Public accessors for accumulated state
@@ -431,7 +445,9 @@ class Map(BackgroundMixin, ChromeMixin):
             Layers (:class:`~mappyng.Choropleth`, :class:`~mappyng.Basemap`
             ...) and elements (:class:`~mappyng.Title`,
             :class:`~mappyng.ScaleBar`, :class:`~mappyng.Insets` ...).
-            Each layer is assigned a unique ``id``.
+            Each layer is assigned a unique ``id``. A layer already added
+            to another map is copied (its data is shared), so the same
+            layer object can be passed to several maps.
 
         Returns
         -------
@@ -472,6 +488,13 @@ class Map(BackgroundMixin, ChromeMixin):
                     "map with m + item."
                 )
             if isinstance(item, _Layer):
+                # A layer belongs to one map: it is drawn once and carries
+                # that map's id. Added to a second map, it is copied (the
+                # data is shared), so both maps draw it.
+                owner = getattr(item, "_owner", None)
+                if owner is not None and owner() is not self:
+                    item = item.copy()
+                item._owner = weakref.ref(self)
                 # Public Layer.id uses a separate counter namespace so it
                 # never consumes the per-kind counter the render path uses
                 # for internal SVG element ids.
@@ -1081,6 +1104,27 @@ class Map(BackgroundMixin, ChromeMixin):
     # Data helpers
     # ------------------------------------------------------------------
 
+    def _in_map_crs(self, gdf: Any) -> Any:
+        """Return *gdf* in the CRS of the map, reprojecting it if needed.
+
+        A layer may come in another CRS than the map's GeoDataFrame; drawn
+        as is, its coordinates would fall outside the map and nothing would
+        appear. Data without a CRS (or a map without one) is left untouched.
+        """
+        map_crs = self.gdf.crs
+        crs = getattr(gdf, "crs", None)
+        if gdf is None or map_crs is None or crs is None or crs == map_crs:
+            return gdf
+        try:
+            return gdf.to_crs(map_crs)
+        except GEO_ERRORS as e:
+            warnings.warn(
+                f"A layer is in CRS {crs.to_string()} and could not be "
+                f"reprojected to the map CRS ({e}); it is drawn with its "
+                f"original coordinates and may be misplaced or missing."
+            )
+            return gdf
+
     def _clip_gdf(self, gdf: gpd.GeoDataFrame,
                   bbox: list[float]) -> gpd.GeoDataFrame:
         """Clip a GeoDataFrame to a bounding box."""
@@ -1321,7 +1365,10 @@ class Map(BackgroundMixin, ChromeMixin):
             ) from e
         svg_bytes = self.to_string().encode("utf-8")
         if ext == ".png":
-            cairosvg.svg2png(bytestring=svg_bytes, write_to=path, dpi=dpi)
+            # The SVG is sized in pixels, which cairosvg maps to 96 dpi
+            # whatever its own dpi argument: the resolution is a scale.
+            cairosvg.svg2png(bytestring=svg_bytes, write_to=path,
+                             scale=dpi / D.SVG_REFERENCE_DPI)
         else:  # .pdf
             cairosvg.svg2pdf(bytestring=svg_bytes, write_to=path)
         return self

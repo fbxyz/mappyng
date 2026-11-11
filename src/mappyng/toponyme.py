@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import geopandas as gpd
+import pandas as pd
 from shapely.geometry import MultiPoint, Point
 from shapely.geometry import box as shapely_box
 from shapely.strtree import STRtree
@@ -158,7 +159,9 @@ class LabelConfig:
     label_offset : float
         Distance from anchor point to label edge in SVG px (default 4.0).
     max_displacement : float
-        Maximum displacement from the initial position before hiding (px).
+        Maximum distance (px) a label may be moved away from its initial
+        position, measured between the label edge and the edge of the
+        symbol at its anchor (default 40.0).
     avoid_overlap : bool
         Enable label-label overlap avoidance (default True).
     allow_hide : bool
@@ -283,6 +286,19 @@ class ObstacleIndex:
     def __init__(self, geoms: list[Any]):
         self._geoms = list(geoms)
         self._tree = STRtree(self._geoms) if self._geoms else None
+        self._bounds = [g.bounds for g in self._geoms]
+
+    def overlap_area_bounds(self, x1: float, y1: float,
+                            x2: float, y2: float) -> float:
+        """Same as :meth:`overlap_area` for the box ``(x1, y1, x2, y2)``.
+
+        Most candidate positions touch no obstacle: a float test on the
+        obstacle bounds settles those without building a geometry.
+        """
+        for bx1, by1, bx2, by2 in self._bounds:
+            if x1 < bx2 and bx1 < x2 and y1 < by2 and by1 < y2:
+                return self.overlap_area(shapely_box(x1, y1, x2, y2))
+        return 0.0
 
     def overlap_area(self, label_box) -> float:
         if not self._tree:
@@ -359,26 +375,38 @@ class LabelPlacer:
         bb = self._bb_overlap
         w_LL, w_LA = cfg.w_LL, cfg.w_LA
 
-        # Label-label and label-anchor overlap (pure float, O(n))
+        # Label-label and label-anchor overlap (pure float, O(n)). This is
+        # the hot loop of the annealing: the box intersection of
+        # _bb_overlap is written out, and a pair that does not overlap
+        # adds nothing.
         for other in self.labels:
-            if other is lab or not other.visible:
-                # Still check anchor even when same label
-                pass
-            else:
+            if other is not lab and other.visible:
                 # label-label
-                e += w_LL * bb(lx1, ly1, lx2, ly2,
-                                other.x, other.y,
-                                other.x + other.width, other.y + other.height)
+                ox1 = other.x
+                ox2 = ox1 + other.width
+                dx = (lx2 if lx2 < ox2 else ox2) - (lx1 if lx1 > ox1 else ox1)
+                if dx > 0:
+                    oy1 = other.y
+                    oy2 = oy1 + other.height
+                    dy = ((ly2 if ly2 < oy2 else oy2)
+                          - (ly1 if ly1 > oy1 else oy1))
+                    if dy > 0:
+                        e += w_LL * (dx * dy)
             # label-anchor for every anchor (including self)
             r = other.anchor_r
-            e += w_LA * bb(lx1, ly1, lx2, ly2,
-                            other.anchor_x - r, other.anchor_y - r,
-                            other.anchor_x + r, other.anchor_y + r)
+            ox1 = other.anchor_x - r
+            ox2 = other.anchor_x + r
+            dx = (lx2 if lx2 < ox2 else ox2) - (lx1 if lx1 > ox1 else ox1)
+            if dx > 0:
+                oy1 = other.anchor_y - r
+                oy2 = other.anchor_y + r
+                dy = (ly2 if ly2 < oy2 else oy2) - (ly1 if ly1 > oy1 else oy1)
+                if dy > 0:
+                    e += w_LA * (dx * dy)
 
         # Label-obstacle overlap (shapely STRtree, sparse)
         if cfg.avoid_overlap:
-            lbox = _label_box(lx1, ly1, lab.width, lab.height)
-            e += cfg.w_LO * self.obs.overlap_area(lbox)
+            e += cfg.w_LO * self.obs.overlap_area_bounds(lx1, ly1, lx2, ly2)
 
         # Label-chrome overlap (float arithmetic, typically few boxes)
         vx0, vy0, vx1, vy1 = self.vbbox
@@ -413,10 +441,16 @@ class LabelPlacer:
         lab.x += rng.gauss(0, sigma)
         lab.y += rng.gauss(0, sigma)
 
-        # Reject if too far from anchor
-        cx = lab.x + lab.width / 2
-        cy = lab.y + lab.height / 2
-        if math.sqrt((cx - lab.anchor_x) ** 2 + (cy - lab.anchor_y) ** 2) > cfg.max_displacement:
+        # Reject if too far from the anchor. The distance runs from the
+        # label edge to the edge of the anchor symbol: measured between
+        # centres, a wide label or a large symbol would already be "too
+        # far" at its initial position and could never move.
+        gap_x = max(lab.x - lab.anchor_x, 0.0,
+                    lab.anchor_x - (lab.x + lab.width))
+        gap_y = max(lab.y - lab.anchor_y, 0.0,
+                    lab.anchor_y - (lab.y + lab.height))
+        gap = math.sqrt(gap_x ** 2 + gap_y ** 2) - lab.symbol_r
+        if gap > cfg.max_displacement:
             lab.x, lab.y = old_x, old_y
             return
 
@@ -655,7 +689,7 @@ def emit_numbered_circles(
         g = ET.SubElement(layer_elem, "g")
         g.set("class", "mappyng-label-numbered")
         g.set("data-n", str(n))
-        g.set("data-label", _xml_escape(lab.text))
+        g.set("data-label", lab.text)  # ElementTree escapes attributes
 
         circ = ET.SubElement(g, "circle")
         circ.set("cx", f"{lab.anchor_x:.2f}")
@@ -847,7 +881,11 @@ def place_labels(
     anchor_r = max(config.font_size * 0.3, 2.0)
 
     for _, row in gdf.iterrows():
-        text = str(row[column]) if row[column] is not None else ""
+        raw = row[column]
+        # None, NaN, NaT and pd.NA all mean "no name": no label is drawn.
+        if raw is None or (not isinstance(raw, str) and pd.isna(raw)):
+            continue
+        text = str(raw)
         if not text:
             continue
 
@@ -868,6 +906,8 @@ def place_labels(
         priority = float(row[config.priority_col]) if (
             config.priority_col and config.priority_col in gdf.columns
         ) else 0.0
+        if priority != priority:  # NaN: a missing priority ranks last
+            priority = float("-inf")
 
         # Wrapping: split at dash if text too long
         if config.wrap:

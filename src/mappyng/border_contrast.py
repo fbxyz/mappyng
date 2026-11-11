@@ -27,21 +27,10 @@ from typing import Any
 import numpy as np
 import shapely
 
+from .config import parse_color
+
 #: Layer name of the redrawn borders in the SVG.
 BORDER_LAYER = "choropleth_borders"
-
-_NAMED_COLORS = {
-    "black": "#000000", "white": "#ffffff", "gray": "#808080",
-    "grey": "#808080", "silver": "#c0c0c0", "dimgray": "#696969",
-    "dimgrey": "#696969", "darkgray": "#a9a9a9", "darkgrey": "#a9a9a9",
-    "lightgray": "#d3d3d3", "lightgrey": "#d3d3d3", "red": "#ff0000",
-    "maroon": "#800000", "yellow": "#ffff00", "olive": "#808000",
-    "lime": "#00ff00", "green": "#008000", "aqua": "#00ffff",
-    "cyan": "#00ffff", "teal": "#008080", "blue": "#0000ff",
-    "navy": "#000080", "fuchsia": "#ff00ff", "magenta": "#ff00ff",
-    "purple": "#800080", "orange": "#ffa500",
-}
-
 
 @dataclass
 class BorderContrast:
@@ -139,29 +128,10 @@ def parse_border_contrast(value: Any) -> BorderContrast | None:
 
 def _rgb(color: str | None) -> tuple[int, int, int] | None:
     """Parse a colour; ``None`` for no colour ("none", "transparent", None)."""
-    if color is None:
-        return None
-    text = str(color).strip().lower()
-    if text in ("none", "transparent", ""):
-        return None
-    text = _NAMED_COLORS.get(text, text)
-    if text.startswith("#"):
-        digits = text[1:]
-        if len(digits) in (3, 4):
-            digits = "".join(c * 2 for c in digits[:3])
-        elif len(digits) in (6, 8):
-            digits = digits[:6]
-        else:
-            digits = ""
-        try:
-            return (int(digits[0:2], 16), int(digits[2:4], 16),
-                    int(digits[4:6], 16))
-        except ValueError:
-            pass
-    raise ValueError(
-        f"border_contrast: cannot read the colour {color!r}. Use #RRGGBB, "
-        f"#RGB or a basic colour name."
-    )
+    try:
+        return parse_color(color)
+    except ValueError as e:
+        raise ValueError(f"border_contrast: {e}") from None
 
 
 def luminance(color: str) -> float:

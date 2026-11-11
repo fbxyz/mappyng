@@ -32,6 +32,7 @@ from . import defaults as D
 from .border_contrast import parse_border_contrast, report_weak_borders
 from .choropleth import (
     ChoroplethLegendConfig,
+    _class_index,
     _draw_classified_gdf,
     _draw_legend,
     _draw_nodata_gdf,
@@ -39,6 +40,7 @@ from .choropleth import (
 )
 from .choropleth_classify import CategoryReport
 from .detail import ZOOM, detail_for, join_detail, normalize_detail
+from .legend import make_legend_config, record_legend, stack_legend
 from .renderer import SvgViewport
 
 
@@ -137,11 +139,13 @@ def add_category(
     int
         The layer id.
     """
-    layer_id = map_obj._next_layer_id("category")
+    # Same counter as Choropleth: both draw "choro-<id>-..." elements and
+    # file their report under this id, so the ids must not collide.
+    layer_id = map_obj._next_layer_id("choropleth")
 
     style = map_obj.style
     stroke = stroke or style["edge_color"]
-    sw = stroke_width or style["edge_width"]
+    sw = style["edge_width"] if stroke_width is None else stroke_width
     z = style.config.z_order.CHOROPLETH
     border_cfg = parse_border_contrast(border_contrast)
 
@@ -191,7 +195,8 @@ def add_category(
             c: ("mean" if c == opacity_column else "first")
             for c in frame.columns if c not in ("geometry", *key_cols)
         }
-        return frame.dissolve(by=group_keys, aggfunc=aggfunc).reset_index()
+        return _class_index(
+            frame.dissolve(by=group_keys, aggfunc=aggfunc).reset_index())
 
     data = _finish(full_data)
 
@@ -226,7 +231,8 @@ def add_category(
                                   "label_position": "center",
                                   "labels": labels}
         merged.update(legend_params or {})
-        legend_cfg = ChoroplethLegendConfig(**merged)
+        legend_cfg = make_legend_config(
+            ChoroplethLegendConfig, merged, "Category legend")
     legend_cfg.resolve_defaults(style, font_scale=getattr(map_obj, "font_scale", 1.0))
     bins = np.arange(len(colors) + 1, dtype=float)
 
@@ -284,7 +290,9 @@ def add_category(
                                  simplify=simplify)
 
     if show_legend:
-        _draw_legend(map_obj.svg, colors, bins, legend_cfg, not nodata.empty,
-                     map_obj.main, map_obj, values=None)
+        stacked = stack_legend(map_obj, legend_cfg)
+        record_legend(map_obj, stacked, _draw_legend(
+            map_obj.svg, colors, bins, legend_cfg, not nodata.empty,
+            map_obj.main, map_obj, values=None))
 
     return layer_id

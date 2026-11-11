@@ -138,6 +138,8 @@ class Layer(abc.ABC):
         self.params: dict[str, Any] = _normalize_params(params)
         self.id: str | None = None
         self._rendered = False
+        #: Weak reference to the map the layer was added to, if any.
+        self._owner: Any = None
         self.validate()
 
     # -- lifecycle ----------------------------------------------------
@@ -192,6 +194,7 @@ class Layer(abc.ABC):
         new.params = dict(self.params)
         new.id = None
         new._rendered = False
+        new._owner = None
         if hasattr(new, "report"):
             new.report = None  # a copy has not been drawn yet
         return new

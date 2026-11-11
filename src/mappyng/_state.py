@@ -38,6 +38,9 @@ class MapState:
         Parameters of the chrome elements (title, source, scale bar,
         north arrow), keyed by element name. Drawn when the map is
         built, and serialised.
+    legend_bottom : float or None
+        Bottom (SVG px) of the lowest legend placed automatically so far.
+        The next legend without an explicit position goes below it.
     classification_reports : dict of int to ClassificationReport
         What each Choropleth layer actually did (method, bounds, class
         sizes, excluded values, adjustments), keyed by layer id.
@@ -52,3 +55,4 @@ class MapState:
     layers: list[Any] = field(default_factory=list)
     chrome: dict[str, Any] = field(default_factory=dict)
     classification_reports: dict[int, Any] = field(default_factory=dict)
+    legend_bottom: float | None = None

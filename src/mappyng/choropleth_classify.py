@@ -56,13 +56,13 @@ def _resolve_stdmean_k(num_classes: int) -> int:
 
 def _resolve_num_classes(method: str | list, num_classes: int) -> int:
     """Return the effective number of classes."""
+    if not isinstance(method, str):
+        # method is a sequence of break points (edges): N+1 values to N classes
+        return len(method) - 1
     if method == "Q6":
         return 6
     if method == "StdMean":
         return _resolve_stdmean_k(num_classes)
-    if isinstance(method, list):
-        # method is a list of break points (edges): N+1 values to N classes
-        return len(method) - 1
     if not D.CHOROPLETH_MIN_CLASSES <= num_classes <= D.CHOROPLETH_MAX_CLASSES:
         raise ValueError(
             f"num_classes must be {D.CHOROPLETH_MIN_CLASSES}-"
@@ -368,10 +368,34 @@ def classify(
     gdf = gdf.copy()
     nodata = gdf[gdf[column].isna()]
     gdf = gdf.dropna(subset=[column])
+    if gdf.empty:
+        raise ValueError(
+            f"Choropleth: column {column!r} holds no value (every row is "
+            f"missing), so there is nothing to classify. Check the column "
+            f"name and the join that filled it."
+        )
 
-    if isinstance(method, list):
+    if not isinstance(method, str):
         bins_list = [float(v) for v in method]
-        scheme = mc.UserDefined(gdf[column], bins=bins_list[1:])
+        if len(bins_list) < 2:
+            raise ValueError(
+                f"Custom breaks need at least two values (the lower and "
+                f"upper bounds of one class), got {bins_list}."
+            )
+        upper = bins_list[1:]
+        data_max = float(gdf[column].max())
+        if data_max > upper[-1]:
+            # mapclassify would add a class above the last break; the breaks
+            # given set the number of classes, so the last one is widened.
+            warnings.warn(
+                f"Custom breaks: the largest value of {column!r} "
+                f"({data_max:g}) is above the last break ({upper[-1]:g}). "
+                f"The last class is extended to {data_max:g}; add a break "
+                f"to give these values a class of their own.",
+                UserWarning, stacklevel=2,
+            )
+            upper = upper[:-1] + [data_max]
+        scheme = mc.UserDefined(gdf[column], bins=upper)
     else:
         if method not in METHODS:
             raise ValueError(f"Unknown method '{method}'. Available: {list(METHODS)}")
@@ -432,7 +456,8 @@ def _resolve_opacity_bins(
         edges = np.asarray(sorted(float(b) for b in opacity_bins))
     n = len(edges) - 1
     gdf = gdf.copy()
-    values = gdf[opacity_column].to_numpy(dtype=float)
+    # A missing value counts as 0, as it does when opacity stays continuous.
+    values = np.nan_to_num(gdf[opacity_column].to_numpy(dtype=float), nan=0.0)
     idx = np.clip(np.digitize(values, edges[1:-1], right=True), 0, n - 1)
     centers = (edges[:-1] + edges[1:]) / 2
     gdf[opacity_column] = centers[idx]

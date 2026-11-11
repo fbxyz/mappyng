@@ -25,6 +25,7 @@ from .legend import (
     ensure_nodata_hatch,
     estimate_text_width,
     legend_fonts,
+    legend_id_suffix,
 )
 from .renderer import SvgViewport
 
@@ -72,6 +73,10 @@ class ChoroplethLegendConfig(BaseLegendConfig):
     label_format : str
         Label content when ``label_position="center"``: ``"value"`` (lower
         bound only) or ``"range"`` (``[min, max]`` interval).
+    range_format : str
+        Wording of a ``"range"`` label, with the placeholders ``{low}`` and
+        ``{high}`` (default ``"from {low} to {high}"``; for French,
+        ``"de {low} à {high}"``).
     label_anchor : str
         SVG ``text-anchor`` for rotated labels: ``"middle"`` (default) or
         ``"end"``.
@@ -95,8 +100,9 @@ class ChoroplethLegendConfig(BaseLegendConfig):
     vertical_label_gap : float
         Gap between swatch right edge and label in vertical mode.
     labels : list of str or None
-        Custom label list that replaces auto-generated range labels.
-        Must have length == num_classes.
+        Custom label list that replaces auto-generated range labels, one
+        per class, drawn centred on each swatch. Must have length ==
+        num_classes.
     """
 
     decimals: int = D.CHOROPLETH_DECIMALS
@@ -113,6 +119,8 @@ class ChoroplethLegendConfig(BaseLegendConfig):
     or 'center' (n labels centered inside each swatch)."""
     label_format: str = "value"
     """Label content in center mode: 'value' (min bound) or 'range' ([min, max])."""
+    range_format: str = "from {low} to {high}"
+    """Wording of a 'range' label, with {low} and {high} placeholders."""
     label_anchor: str = "middle"
     """SVG text-anchor for rotated labels: 'end' or 'middle' (default).
     With 'middle', vertical offset is auto-adjusted to prevent overlap."""
@@ -213,6 +221,10 @@ class FactorLegend(ChoroplethLegendConfig):
         Characters per line before a pole text wraps.
     note_max_chars : int
         Characters per line before the note wraps.
+    variance_label : str
+        Wording of the variance line, with the placeholder ``{pct}``
+        (default ``"{pct}% of total variance"``; for French,
+        ``"{pct} % de la variance totale"``).
     """
 
     variance: float | None = None
@@ -224,6 +236,13 @@ class FactorLegend(ChoroplethLegendConfig):
     value_fontsize: int | None = None
     pole_max_chars: int = D.FACTOR_POLE_MAX_CHARS
     note_max_chars: int = D.FACTOR_NOTE_MAX_CHARS
+    variance_label: str = "{pct}% of total variance"
+
+    def variance_text(self) -> str:
+        """Return the variance line (``variance`` must be set)."""
+        pct = _fmt_value((self.variance or 0.0) * 100, 1, self.thousands_sep,
+                         self.decimal_sep)
+        return self.variance_label.format(pct=pct)
 
     def resolve_defaults(self, style, font_scale: float = 1.0) -> None:
         super().resolve_defaults(style, font_scale)
@@ -239,9 +258,7 @@ class FactorLegend(ChoroplethLegendConfig):
         """Return the title with the variance share appended, if any."""
         if self.variance is None:
             return self.title
-        pct = _fmt_value(self.variance * 100, 1, self.thousands_sep,
-                         self.decimal_sep)
-        suffix = f"{pct}% of total variance"
+        suffix = self.variance_text()
         return f"{self.title} ({suffix})" if self.title else f"({suffix})"
 
 
@@ -255,15 +272,12 @@ def _fmt_value(v, decimals: int, thousands_sep: str = " ", decimal_sep: str = 
 
 
 def _format_range_label(low, high, decimals: int,
-                        thousands_sep: str = " ", decimal_sep: str = ".") -> str:
+                        thousands_sep: str = " ", decimal_sep: str = ".",
+                        template: str = "from {low} to {high}") -> str:
     """Format a range label like ``from 123 to 456``."""
-    def _fmt(v):
-        if decimals <= 0:
-            s = f"{int(round(v)):,}"
-        else:
-            s = f"{v:,.{decimals}f}"
-        return s.replace(",", "\x00").replace(".", decimal_sep).replace("\x00", thousands_sep)
-    return f"from {_fmt(low)} to {_fmt(high)}"
+    return template.format(
+        low=_fmt_value(low, decimals, thousands_sep, decimal_sep),
+        high=_fmt_value(high, decimals, thousands_sep, decimal_sep))
 
 
 def _draw_legend_histogram(
@@ -367,18 +381,25 @@ def _draw_legend(
     main_viewport: SvgViewport,
     map_obj=None,
     values: np.ndarray | None = None,
-) -> None:
+) -> tuple[float, float, float, float] | None:
     """Draw a choropleth legend below the main map.
 
     Supports horizontal (classic boundary labels) and vertical
-    (swatch + range text) orientations.
+    (swatch + range text) orientations. Returns the legend bounding box.
     """
+    if config.labels is not None and len(config.labels) != len(colors):
+        raise ValueError(
+            f"The legend has {len(config.labels)} custom label(s) "
+            f"({list(config.labels)!r}) but the layer has {len(colors)} "
+            f"class(es). Give exactly one label per class."
+        )
     if config.orientation == "vertical":
         bbox = _draw_legend_vertical(svg_doc, colors, bins, config, has_nodata, main_viewport, values=values)
     else:
         bbox = _draw_legend_horizontal(svg_doc, colors, bins, config, has_nodata, main_viewport, values=values)
     if map_obj is not None and bbox is not None:
         map_obj.overflow.register(*bbox)
+    return bbox
 
 
 def _fmt_bin(config: ChoroplethLegendConfig, value) -> str:
@@ -394,7 +415,7 @@ def _class_label(config: ChoroplethLegendConfig, bins: np.ndarray, i: int) -> st
     if config.label_format == "range":
         return _format_range_label(
             bins[i], bins[i + 1], config.decimals,
-            config.thousands_sep, config.decimal_sep)
+            config.thousands_sep, config.decimal_sep, config.range_format)
     return _fmt_bin(config, bins[i])
 
 
@@ -407,10 +428,11 @@ def _draw_nodata_entry(
 
     Returns the estimated width of the label.
     """
-    fill, hc = ensure_nodata_hatch(svg_doc, config, pattern_id)
+    suffix = legend_id_suffix(legend_g, "choropleth-legend")
+    fill, hc = ensure_nodata_hatch(svg_doc, config, pattern_id + suffix)
     add_legend_swatch(
         legend_g, x, y, sw_w, sw_h, config, fill=fill, stroke=hc,
-        id="choropleth-legend-nodata",
+        id=f"choropleth-legend{suffix}-nodata",
         css_class="choropleth-legend choropleth-nodata",
     )
     nd_label = config.nodata_label or D.LEGEND_NODATA_LABEL
@@ -423,9 +445,10 @@ def _draw_nodata_entry(
 
 def _draw_class_swatch(legend_g, config, x, y, sw_w, sw_h, color, i, fc):
     """Draw the swatch of class *i*."""
+    suffix = legend_id_suffix(legend_g, "choropleth-legend")
     add_legend_swatch(
         legend_g, x, y, sw_w, sw_h, config, fill=color, stroke=fc,
-        id=f"choropleth-legend-swatch-{i}",
+        id=f"choropleth-legend{suffix}-swatch-{i}",
         css_class=f"choropleth-legend choropleth-{i}",
     )
 
@@ -470,12 +493,16 @@ def _draw_legend_horizontal(
     def rotation(lx):
         return {"transform": f"rotate({label_rot}, {lx:.2f}, {label_y:.2f})"}
 
-    if config.label_position == "center":
-        # n labels, one per swatch, centered inside each swatch
+    label_texts: list[str] = []
+    last_lx = legend_x
+    if config.label_position == "center" or config.labels is not None:
+        # n labels, one per swatch, centered inside each swatch. Custom
+        # labels name the classes, so they are always centred.
         for i in range(num):
-            lx = legend_x + i * (sw_w + sw_gap) + sw_w / 2
+            lx = last_lx = legend_x + i * (sw_w + sw_gap) + sw_w / 2
+            label_texts.append(_class_label(config, bins, i))
             add_legend_text(
-                legend_g, lx, label_y, _class_label(config, bins, i),
+                legend_g, lx, label_y, label_texts[-1],
                 font_size, ff, fc,
                 anchor=config.label_anchor if label_rot else "middle",
                 **(rotation(lx) if label_rot else {}),
@@ -494,6 +521,8 @@ def _draw_legend_horizontal(
             else:
                 # Center of the gap between swatch[i-1] and swatch[i]
                 lx = legend_x + (i - 1) * (sw_w + sw_gap) + sw_w + sw_gap / 2
+            last_lx = lx
+            label_texts.append(_fmt_bin(config, value))
 
             if label_rot:
                 add_legend_text(
@@ -508,23 +537,36 @@ def _draw_legend_horizontal(
                                 font_size, ff, fc, anchor=anchor)
 
     # ---- No-data indicator, swatch à droite, label à droite du swatch ----
+    x1 = legend_x + total_w
     if has_nodata:
-        _draw_nodata_entry(
+        nd_label_w = _draw_nodata_entry(
             legend_g, svg_doc, config, "hatch-legend-choropleth-horiz",
             legend_x + total_w + config.nodata_gap, y_cursor,
             sw_w, sw_h, font_size, ff, fc)
+        x1 = (legend_x + total_w + config.nodata_gap + sw_w
+              + config.nodata_label_gap + nd_label_w)
 
-    # ---- Frame ----
-    content_h = label_y - legend_y + font_size
+    # Rotated labels reach below their baseline and past the last swatch:
+    # count their full length, whichever way they turn.
+    y1 = label_y + font_size
+    max_label_w = max(
+        (estimate_text_width(t, font_size) for t in label_texts), default=0.0)
+    if label_rot:
+        theta = math.radians(abs(label_rot))
+        y1 = label_y + max_label_w * math.sin(theta) + font_size * 0.3
+        x1 = max(x1, last_lx + max_label_w * abs(math.cos(theta)))
+    elif label_texts and (config.label_position == "center"
+                          or config.labels is not None):
+        # Centred labels may be wider than their swatch.
+        x1 = max(x1, last_lx + estimate_text_width(label_texts[-1],
+                                                   font_size) / 2)
+
+    # ---- Frame (encloses the no-data entry and the labels) ----
     draw_config_frame(
         legend_g, svg_doc, config,
-        legend_x, legend_y - font_size, total_w, content_h + font_size,
+        legend_x, legend_y - font_size, x1 - legend_x,
+        y1 - (legend_y - font_size),
     )
-
-    x1 = legend_x + total_w
-    if has_nodata:
-        x1 = legend_x + total_w + config.nodata_gap + sw_w + config.nodata_label_gap + font_size * 4
-    y1 = label_y + font_size
 
     if config.histogram and values is not None:
         hist_bbox = _draw_legend_histogram(
@@ -533,6 +575,7 @@ def _draw_legend_horizontal(
         )
         if hist_bbox is not None:
             x1 = hist_bbox[2]
+            y1 = max(y1, hist_bbox[3])
 
     return (legend_x, legend_y, x1, y1)
 
@@ -699,6 +742,8 @@ def _draw_factor_legend(svg_doc, colors, bins, config, has_nodata,
                         main_viewport, map_obj=None):
     """Draw a factor (PCA) legend: title, poles, class block, note.
 
+    Returns the legend bounding box ``(x0, y0, x1, y1)``.
+
     Vertical: poles sit above and below the stacked swatches. Horizontal:
     poles sit at the two ends above the swatch row. Breaks and colours come
     from the choropleth layer unchanged.
@@ -719,6 +764,8 @@ def _draw_factor_legend(svg_doc, colors, bins, config, has_nodata,
     else:
         legend_x, legend_y = compute_legend_position(config, vb)
     legend_g = begin_legend_group(svg_doc, "factor-legend")
+    sfx = legend_id_suffix(legend_g, "factor-legend")
+    hatch_id = f"hatch-legend-factor{sfx}"
 
     y = draw_legend_title(legend_g, legend_x, legend_y, config, align="left")
     x1 = legend_x
@@ -726,10 +773,8 @@ def _draw_factor_legend(svg_doc, colors, bins, config, has_nodata,
 
     # Variance share, smaller, on its own line below the title.
     if config.variance is not None:
-        pct = _fmt_value(config.variance * 100, 1, config.thousands_sep,
-                         config.decimal_sep)
         y, w = _draw_wrapped_text(legend_g, legend_x, y,
-                                  f"{pct}% of total variance",
+                                  config.variance_text(),
                                   config.note_max_chars, nfs, ff, fc)
         x1 = max(x1, legend_x + w)
         y += D.FACTOR_POLE_GAP
@@ -759,7 +804,7 @@ def _draw_factor_legend(svg_doc, colors, bins, config, has_nodata,
             row_y = block_top + i * (sw_h + sw_gap)
             add_legend_swatch(
                 legend_g, swatch_x, row_y, sw_w, sw_h, config, fill=color,
-                stroke=fc, id=f"factor-legend-swatch-{i}",
+                stroke=fc, id=f"factor-legend{sfx}-swatch-{i}",
                 css_class=f"factor-legend factor-{i}")
         label_x = swatch_x + sw_w + label_gap
         max_lw = 0.0
@@ -788,10 +833,10 @@ def _draw_factor_legend(svg_doc, colors, bins, config, has_nodata,
         # No-data row, set further down for separation.
         if has_nodata:
             y += D.FACTOR_NODATA_GAP
-            fill, hc = ensure_nodata_hatch(svg_doc, config, "hatch-legend-factor")
+            fill, hc = ensure_nodata_hatch(svg_doc, config, hatch_id)
             add_legend_swatch(
                 legend_g, swatch_x, y, sw_w, sw_h, config, fill=fill,
-                stroke=hc, id="factor-legend-nodata")
+                stroke=hc, id=f"factor-legend{sfx}-nodata")
             nd = config.nodata_label or D.LEGEND_NODATA_LABEL
             add_legend_text(legend_g, label_x, y + sw_h / 2 + vfs * 0.35, nd,
                             vfs, ff, fc)
@@ -843,7 +888,7 @@ def _draw_factor_legend(svg_doc, colors, bins, config, has_nodata,
             cx = bar_x + i * (sw_w + sw_gap)
             add_legend_swatch(
                 legend_g, cx, bar_top, sw_w, sw_h, config, fill=color,
-                stroke=fc, id=f"factor-legend-swatch-{i}",
+                stroke=fc, id=f"factor-legend{sfx}-swatch-{i}",
                 css_class=f"factor-legend factor-{i}")
 
         # Break values at the class boundaries, rotated like the choropleth.
@@ -869,11 +914,11 @@ def _draw_factor_legend(svg_doc, colors, bins, config, has_nodata,
         y = lbl_y + vfs
 
         if has_nodata:
-            fill, hc = ensure_nodata_hatch(svg_doc, config, "hatch-legend-factor")
+            fill, hc = ensure_nodata_hatch(svg_doc, config, hatch_id)
             nd_x = bar_x + bar_w + config.nodata_gap
             add_legend_swatch(
                 legend_g, nd_x, bar_top, sw_w, sw_h, config, fill=fill,
-                stroke=hc, id="factor-legend-nodata")
+                stroke=hc, id=f"factor-legend{sfx}-nodata")
             nd = config.nodata_label or D.LEGEND_NODATA_LABEL
             nd_label_x = nd_x + sw_w + config.nodata_label_gap
             add_legend_text(legend_g, nd_label_x,
@@ -895,3 +940,4 @@ def _draw_factor_legend(svg_doc, colors, bins, config, has_nodata,
 
     if map_obj is not None:
         map_obj.overflow.register(legend_x, legend_y, x1, y1)
+    return (legend_x, legend_y, x1, y1)

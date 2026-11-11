@@ -58,7 +58,8 @@ class BackgroundMixin(MapBase):
         details = self._detail_in_map_crs(detail)
         fill = fill or self.basemap_color or self.style["basemap_fill_color"]
         stroke = stroke or self.style["basemap_edge_color"]
-        sw = stroke_width or self.style["basemap_edge_width"]
+        sw = (self.style["basemap_edge_width"] if stroke_width is None
+              else stroke_width)
         z = self.style.config.z_order.BASEMAP
         attrs = dict(fill=fill, stroke=stroke, stroke_width=sw)
 
@@ -464,7 +465,9 @@ class BackgroundMixin(MapBase):
         position = cfg.pop("position", "background")
         fill = cfg.pop("fill", "none")
         stroke = cfg.pop("stroke", None) or self.style["edge_color"]
-        stroke_width = cfg.pop("stroke_width", None) or self.style["edge_width"]
+        stroke_width = cfg.pop("stroke_width", None)
+        if stroke_width is None:
+            stroke_width = self.style["edge_width"]
         fill_opacity = cfg.pop("fill_opacity", None)
         stroke_opacity = cfg.pop("stroke_opacity", None)
         stroke_linecap = cfg.pop("stroke_linecap", None)

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import math
 import textwrap
+import warnings
 import xml.etree.ElementTree as ET
 from typing import Any
 
@@ -185,7 +186,6 @@ class ChromeMixin(MapBase):
 
         Returns a "nice" value (1, 2, 5 × 10^n) that is <= *max_geo_length*.
         """
-        import math
         if max_geo_length <= 0:
             return 1.0
         exp = math.floor(math.log10(max_geo_length))
@@ -203,16 +203,18 @@ class ChromeMixin(MapBase):
         ----------------------
         length : float, optional
             Bar length in map CRS units (e.g. meters).  If omitted, a
-            round value is chosen automatically (~20 % of map width).
+            round ground length is chosen automatically (~20 % of map
+            width).
         label : str, optional
             Text above the bar.  If omitted and *length* is set, an
             auto-label is generated using *unit* / *unit_factor*.
             Pass ``""`` to suppress the label entirely.
         unit : str
-            Display unit appended to auto-labels (default ``"km"``).
+            Display unit appended to auto-labels. By default ``"km"``, or
+            ``"m"`` for a bar shorter than one kilometre.
         unit_factor : float
-            Divisor for CRS to display conversion (default ``1000`` for
-            metres to km).
+            Number of metres in one display unit (default ``1000`` for
+            km).
         location : str
             Preset position: ``"lower right"``, ``"lower left"``,
             ``"upper right"``, ``"upper left"``.
@@ -315,25 +317,76 @@ class ChromeMixin(MapBase):
         """Pop the length, unit and label options; return ``(length, label)``.
 
         With no *length* a round value near 20 % of the map width is chosen;
-        with no *label* one is generated from the length and unit.
+        with no *label* one is generated from the length and unit. The
+        returned length is in map CRS units; the label is worked out from
+        its ground length in metres, so a map in degrees or in feet gets a
+        correct label. With no *unit*, kilometres are used, or metres when
+        the bar is shorter than one kilometre.
         """
-        unit = cfg.pop("unit", D.SCALE_BAR_UNIT)
-        unit_factor = cfg.pop("unit_factor", D.SCALE_BAR_UNIT_FACTOR)
+        unit = cfg.pop("unit", None)
+        unit_factor = cfg.pop("unit_factor", None)
+        metres_per_unit = self._metres_per_crs_unit(vb)
 
         length = cfg.pop("length", None)
         if length is None:
             # Auto: pick a nice round value ~ 20% of map geographic width
             geo_w = vb.content_width / vb.scale if vb.scale else 1
-            length = self._nice_scale_length(geo_w * 0.20)
+            length_m = self._nice_scale_length(geo_w * metres_per_unit * 0.20)
+            length = length_m / metres_per_unit
+        else:
+            length_m = length * metres_per_unit
+
+        if unit is None and unit_factor is None:
+            if length_m >= D.SCALE_BAR_UNIT_FACTOR:
+                unit, unit_factor = D.SCALE_BAR_UNIT, D.SCALE_BAR_UNIT_FACTOR
+            else:
+                unit, unit_factor = "m", 1.0
+        elif unit is None:
+            unit = D.SCALE_BAR_UNIT
+        elif unit_factor is None:
+            unit_factor = D.SCALE_BAR_UNIT_FACTOR
 
         label = cfg.pop("label", None)
         if label is None:
-            display_val = length / unit_factor
+            # Up to 3 significant decimals, no trailing zeros ("0.25 km").
+            display_val = round(length_m / unit_factor, 3)
             if display_val == int(display_val):
                 label = f"{int(display_val)} {unit}"
             else:
-                label = f"{display_val:.1f} {unit}"
+                label = f"{display_val:g} {unit}"
         return length, label
+
+    @staticmethod
+    def _metres_per_crs_unit(vb: Any) -> float:
+        """Ground length in metres of one map CRS unit.
+
+        1 for a CRS in metres (or with no CRS), the unit conversion factor
+        for other projected CRS (feet...). For a CRS in degrees, the length
+        of one degree of longitude at the latitude of the map centre: the
+        scale of such a map changes with latitude, so a warning says the bar
+        only holds near the centre.
+        """
+        crs = getattr(vb, "crs", None)
+        if crs is None:
+            return 1.0
+        try:
+            from pyproj import CRS
+            parsed = CRS.from_user_input(crs)
+            if parsed.is_geographic:
+                _, miny, _, maxy = vb.geo_bounds
+                lat = max(-89.0, min(89.0, (miny + maxy) / 2))
+                warnings.warn(
+                    "Scale bar: the map is in degrees (geographic CRS), so "
+                    "its scale changes with latitude. The bar is exact only "
+                    "along the central latitude of the map. Project the "
+                    "data (to_crs) for a scale that holds everywhere.",
+                    UserWarning, stacklevel=2,
+                )
+                return 111_320.0 * math.cos(math.radians(lat))
+            factor = parsed.axis_info[0].unit_conversion_factor
+            return float(factor) if factor and factor > 0 else 1.0
+        except Exception:  # noqa: BLE001 - unreadable CRS: assume metres
+            return 1.0
 
     @staticmethod
     def _scale_bar_anchor(cfg: dict[str, Any], vb: Any, bar_px: float,
@@ -413,7 +466,7 @@ class ChromeMixin(MapBase):
         color        = cfg.pop("color",        D.NORTH_ARROW_COLOR)
         margin       = cfg.pop("margin",       D.NORTH_ARROW_MARGIN)
         label        = cfg.pop("label",        D.NORTH_ARROW_LABEL)
-        font_size    = cfg.pop("font_size",    D.NORTH_ARROW_FONT_SIZE)
+        font_size    = cfg.pop("font_size",    D.NORTH_ARROW_FONT_SIZE) * self.font_scale
         stroke_width = cfg.pop("stroke_width", D.NORTH_ARROW_STROKE_WIDTH)
         rotation     = cfg.pop("rotation",     D.NORTH_ARROW_ROTATION)
         position     = cfg.pop("position",     D.NORTH_ARROW_POSITION)
@@ -500,7 +553,7 @@ class ChromeMixin(MapBase):
                 x=f"{cx:.2f}", y=f"{lbl_y:.2f}",
             )
             txt.text = label
-            txt.set("font-size", str(font_size))
+            txt.set("font-size", f"{font_size:g}")
             txt.set("font-family", D.FONT_FAMILY)
             txt.set("fill", color)
             txt.set("text-anchor", "middle")
@@ -537,8 +590,8 @@ class ChromeMixin(MapBase):
             basemap content area (0,0 = top-left, 1,1 = bottom-right).
             Overrides the automatic positioning of both layouts.
         rotation : float, optional
-            Explicit rotation in degrees (default 90 for vertical, 0 for
-            horizontal).  Only used if ``position`` is not set.
+            Explicit rotation in degrees, counter-clockwise (default 90
+            for vertical, 0 for horizontal or with a manual ``position``).
         font_size : int, optional
             Font size (default from style).
         color : str, optional
@@ -572,7 +625,9 @@ class ChromeMixin(MapBase):
         fs = (cfg.pop("font_size", None)
               or self.style.config.source.font.size) * self.font_scale
         c = cfg.pop("color", None) or self.style.config.source.font.color
-        a = cfg.pop("opacity", None) or self.style.config.source.font.opacity
+        a = cfg.pop("opacity", None)
+        if a is None:
+            a = self.style.config.source.font.opacity
         font_style = cfg.pop("font_style", D.SOURCE_FONT_STYLE)
         font_weight = cfg.pop("font_weight", D.SOURCE_FONT_WEIGHT)
         font_family = cfg.pop("font_family", None) or self.style.config.source.font.family
@@ -658,7 +713,7 @@ class ChromeMixin(MapBase):
                 "text_anchor": text_anchor,
             }
             if rotation:
-                attrs["transform"] = f"rotate(-{rotation}, {lx:.2f}, {ly:.2f})"
+                attrs["transform"] = f"rotate({-rotation:g}, {lx:.2f}, {ly:.2f})"
             self.svg.add_overlay_text(
                 "source", lx, ly, line_text,
                 z_order=D.Z_SOURCE, **attrs,

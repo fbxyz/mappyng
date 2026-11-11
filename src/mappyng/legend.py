@@ -10,6 +10,8 @@ All default values are imported from :mod:`mappyng.defaults`.
 
 from __future__ import annotations
 
+import dataclasses
+import difflib
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from typing import Any, cast
@@ -143,7 +145,8 @@ def _parse_frame_config(raw) -> LegendFrameConfig:
     Accepts:
     - ``False`` / ``None``: disabled
     - ``True``: enabled with all defaults
-    - ``dict``: enabled with overrides; the ``padding`` key may be either a
+    - ``dict``: enabled with overrides (unless it sets ``enabled`` to
+      False); the ``padding`` key may be either a
       float (uniform) or a dict with keys ``top``, ``right``, ``bottom``,
       ``left`` (any omitted side falls back to ``D.LEGEND_FRAME_PADDING``).
     """
@@ -152,7 +155,11 @@ def _parse_frame_config(raw) -> LegendFrameConfig:
     if raw is True:
         return LegendFrameConfig(enabled=True)
     if isinstance(raw, dict):
-        kwargs = {k: v for k, v in raw.items() if k != "padding"}
+        _check_options(LegendFrameConfig, raw, "legend frame")
+        kwargs = {k: v for k, v in raw.items()
+                  if k not in ("padding", "enabled")}
+        if not raw.get("enabled", True):
+            return LegendFrameConfig(enabled=False)
         padding_raw = raw.get("padding", D.LEGEND_FRAME_PADDING)
         if isinstance(padding_raw, dict):
             # Per-side dict: {"top": x, "right": y, "bottom": z, "left": w}
@@ -353,7 +360,8 @@ def ensure_hatch_pattern(
 
     # Normalise style aliases
     _style = style.strip() if style else "///"
-    if _style in ("\\\\", "\\\\\\\\", "back", "backslash"):
+    if _style in ("back", "backslash") or (
+            _style and set(_style) == {"\\"}):
         _style = "back"
     elif _style in ("xxx", "x", "cross_hatch"):
         _style = "xxx"
@@ -506,9 +514,10 @@ def draw_legend_subtitle(
     align = align or D.LEGEND_ALIGN
     anchor = "start" if align == "left" else "middle"
     subtitle_size = config.subtitle_fontsize or D.LEGEND_SUBTITLE_FONT_SIZE
-    # Subtitle is part of the title block, follow its offset.
+    # Subtitle is part of the title block, follow its offset. The vertical
+    # offset is already in *y* when a title was drawn above.
     sx = x + (config.title_offset_x or 0.0)
-    sy = y + (config.title_offset_y or 0.0)
+    sy = y if config.title else y + (config.title_offset_y or 0.0)
 
     ET.SubElement(
         parent, "text",
@@ -522,7 +531,7 @@ def draw_legend_subtitle(
         },
     ).text = config.subtitle
 
-    return y + subtitle_size + D.LEGEND_SUBTITLE_SPACING
+    return sy + subtitle_size + D.LEGEND_SUBTITLE_SPACING
 
 
 def draw_nodata_indicator(
@@ -738,9 +747,82 @@ def ensure_nodata_hatch(svg_doc, config: BaseLegendConfig,
 
 
 def begin_legend_group(svg_doc, group_id: str) -> ET.Element:
-    """Create the ``<g id=group_id>`` of a legend in the legend overlay layer."""
+    """Create the ``<g>`` of a legend in the legend overlay layer.
+
+    Its id is *group_id*, or ``group_id-2``, ``group_id-3``... when the map
+    already holds a legend of that kind, so ids stay unique. The ids of the
+    elements inside are derived from it (see :func:`legend_id_suffix`).
+    """
     layer = svg_doc.get_overlay_layer("legend", z_order=D.Z_LEGEND)
-    return ET.SubElement(layer, "g", id=group_id)
+    taken = {child.get("id") for child in layer}
+    unique, n = group_id, 1
+    while unique in taken:
+        n += 1
+        unique = f"{group_id}-{n}"
+    return ET.SubElement(layer, "g", id=unique)
+
+
+def legend_id_suffix(legend_g: ET.Element, group_id: str) -> str:
+    """Suffix that tells this legend's ids apart: ``""``, ``"-2"``..."""
+    return (legend_g.get("id") or group_id)[len(group_id):]
+
+
+def _check_options(cls: type, options: dict, what: str) -> None:
+    """Raise in plain language when *options* holds a key *cls* lacks."""
+    known = [f.name for f in dataclasses.fields(cls)]
+    unknown = [k for k in options if k not in known]
+    if not unknown:
+        return
+    hints = []
+    for key in unknown:
+        close = difflib.get_close_matches(str(key), known, n=1)
+        hints.append(f"{key!r} (did you mean {close[0]!r}?)" if close
+                     else repr(key))
+    raise ValueError(
+        f"Unknown {what} option(s): {', '.join(hints)}. Available options: "
+        f"{', '.join(sorted(known))}."
+    )
+
+
+def make_legend_config(cls: type, options: dict | None, what: str = "legend"):
+    """Build the legend config *cls* from a dict of options.
+
+    An unknown option (typically a typo) raises a ``ValueError`` that names
+    it and lists the accepted ones.
+    """
+    options = dict(options or {})
+    _check_options(cls, options, what)
+    return cls(**options)
+
+
+def stack_legend(map_obj, config: BaseLegendConfig) -> bool:
+    """Place a legend with no explicit position below the previous one.
+
+    Legends without a ``position`` all default to the same spot under the
+    map. From the second one on, the legend is moved under the lowest
+    legend placed automatically so far. Returns True when the legend is
+    placed automatically; pass the result to :func:`record_legend`.
+    """
+    if config.position is not None:
+        return False
+    bottom = map_obj._state.legend_bottom
+    if bottom is not None:
+        # The title baseline sits on the anchor: leave room for the text.
+        title_h = (config.title_fontsize or 0) if config.title else 0
+        config.position = {
+            "px": map_obj.main.viewbox.content_x,
+            "py": bottom + D.LEGEND_STACK_GAP + title_h,
+        }
+    return True
+
+
+def record_legend(map_obj, stacked: bool, bbox) -> None:
+    """Remember the bottom of an automatically placed legend."""
+    if not stacked or bbox is None:
+        return
+    previous = map_obj._state.legend_bottom
+    map_obj._state.legend_bottom = (
+        bbox[3] if previous is None else max(previous, bbox[3]))
 
 
 def begin_legend(svg_doc, group_id: str, config: BaseLegendConfig, vb) -> tuple:

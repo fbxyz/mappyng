@@ -274,6 +274,21 @@ def _build_hover_css(hover: HoverEffect) -> str:
     return css
 
 
+def _js_str(value: Any) -> str:
+    """*value* as the body of a single-quoted JavaScript string.
+
+    A font family such as ``'Helvetica Neue', sans-serif`` carries quotes
+    that would otherwise close the string and break the whole script.
+    ``</`` and ``]]>`` are split so they can end neither the script element
+    nor its CDATA section.
+    """
+    text = str(value)
+    for old, new in (("\\", "\\\\"), ("'", "\\'"), ("\n", "\\n"),
+                     ("\r", "\\r"), ("</", "<\\/"), ("]]>", "]]\\>")):
+        text = text.replace(old, new)
+    return text
+
+
 def _build_tooltip_script(style: TooltipStyle) -> str:
     """Build the embedded ``<script>`` and ``<style>`` blocks."""
     hover = style.hover
@@ -299,17 +314,17 @@ tt.setAttribute('visibility','hidden');
 tt.setAttribute('pointer-events','none');
 
 var bg=document.createElementNS(ns,'rect');
-bg.setAttribute('fill','{style.background}');
-bg.setAttribute('rx','{style.border_radius}');
-bg.setAttribute('ry','{style.border_radius}');
-bg.setAttribute('stroke','{style.border_color}');
+bg.setAttribute('fill','{_js_str(style.background)}');
+bg.setAttribute('rx','{_js_str(style.border_radius)}');
+bg.setAttribute('ry','{_js_str(style.border_radius)}');
+bg.setAttribute('stroke','{_js_str(style.border_color)}');
 bg.setAttribute('stroke-width','0.5');
 tt.appendChild(bg);
 
 var txt=document.createElementNS(ns,'text');
-txt.setAttribute('fill','{style.text_color}');
-txt.setAttribute('font-size','{style.font_size}');
-txt.setAttribute('font-family','{style.font_family}');
+txt.setAttribute('fill','{_js_str(style.text_color)}');
+txt.setAttribute('font-size','{_js_str(style.font_size)}');
+txt.setAttribute('font-family','{_js_str(style.font_family)}');
 tt.appendChild(txt);
 svg.appendChild(tt);
 
@@ -376,7 +391,7 @@ svg.querySelectorAll('[data-tooltip]').forEach(function(el){{
     var keys=Object.keys(d);
     keys.forEach(function(k,i){{
       var tsK=document.createElementNS(ns,'tspan');
-      tsK.setAttribute('font-weight','{style.key_weight}');
+      tsK.setAttribute('font-weight','{_js_str(style.key_weight)}');
       tsK.textContent=k+' : ';
       if(i===0){{tsK.setAttribute('x','8');tsK.setAttribute('dy','15');}}
       else{{tsK.setAttribute('x','8');tsK.setAttribute('dy','17');}}
@@ -457,7 +472,10 @@ def inject_tooltips(
     script = _build_tooltip_script(style)
     # ET may output </svg> or </ns0:svg> depending on namespace registration
     import re
-    svg_out = re.sub(r'</(?:\w+:)?svg\s*>', script + "\n</svg>", svg_out)
+    # A function as replacement: a string would have its backslashes (the
+    # escapes of the script) read as group references.
+    svg_out = re.sub(r'</(?:\w+:)?svg\s*>', lambda _m: script + "\n</svg>",
+                     svg_out)
 
     return svg_out
 

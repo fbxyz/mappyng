@@ -14,6 +14,31 @@ from .. import defaults as D
 from .base import _UNSET, Layer, RenderContext, collect_set, register_layer
 
 
+def _class_tooltip_frame(column: str, labels: list[str]) -> Any:
+    """Tooltip data of a dissolved layer: one row per class.
+
+    A dissolved polygon merges every feature of a class, so it has no row
+    of its own in the layer data. Its tooltip gives the class instead,
+    under the name of the mapped column. The index matches the element
+    ids written by the renderer (``class0``, ``class1``...).
+    """
+    import pandas as pd
+    return pd.DataFrame(
+        {column: labels}, index=[f"class{i}" for i in range(len(labels))])
+
+
+def _require_column(layer: Layer, column: Any, role: str = "column") -> None:
+    """Raise in plain language when *column* is not a column of the data."""
+    columns = getattr(layer.gdf, "columns", None)
+    if column is None or columns is None or column in columns:
+        return
+    available = [c for c in columns if c != "geometry"]
+    raise ValueError(
+        f"{type(layer).__name__}: {role} {column!r} is not a column of gdf. "
+        f"Available columns: {available}."
+    )
+
+
 @register_layer
 class Choropleth(Layer):
     """Choropleth (graduated colour) layer.
@@ -168,6 +193,7 @@ class Choropleth(Layer):
                 "colours each area by a value, so it has nothing to draw "
                 "without one."
             )
+        _require_column(self, self.params["column"])
         simplify = self.params.get("simplify")
         if simplify is not None and not isinstance(simplify, (int, float)):
             if simplify != "auto":
@@ -222,7 +248,8 @@ class Choropleth(Layer):
         from ..config import DIVERGING_COLORMAPS
         method = self.params.get("method", D.CHOROPLETH_DEFAULT_METHOD)
         cmap = self.params.get("cmap", D.CHOROPLETH_DEFAULT_CMAP)
-        if (method == "StdMean" and isinstance(cmap, str)
+        if (isinstance(method, str) and method == "StdMean"
+                and isinstance(cmap, str)
                 and cmap not in DIVERGING_COLORMAPS):
             choices = ", ".join(repr(c) for c in DIVERGING_COLORMAPS)
             warnings.warn(
@@ -239,7 +266,7 @@ class Choropleth(Layer):
         cfg = dict(self.params)
         column = cfg.pop("column")
         layer_id = _add_choropleth(
-            ctx.map, self.gdf,
+            ctx.map, ctx.map._in_map_crs(self.gdf),
             column=column,
             cmap=cfg.pop("cmap", D.CHOROPLETH_DEFAULT_CMAP),
             reverse=cfg.pop("reverse", False),
@@ -261,14 +288,20 @@ class Choropleth(Layer):
             detail_join=cfg.pop("detail_join", None),
             border_contrast=cfg.pop("border_contrast", None),
         )
+        self.report = ctx.map._state.classification_reports.get(layer_id)
+        tip_gdf = self.gdf
+        if self.params.get("dissolve") and self.report is not None:
+            bins = self.report.bins
+            tip_gdf = _class_tooltip_frame(column, [
+                f"{bins[i]:g} \u2013 {bins[i + 1]:g}"
+                for i in range(len(bins) - 1)])
         ctx.map._state.interactive_layers.append({
             "type": "choropleth",
-            "gdf": self.gdf,
+            "gdf": tip_gdf,
             "column": column,
             "layer_id": layer_id,
             "id_prefix": f"choro-{layer_id}-",
         })
-        self.report = ctx.map._state.classification_reports.get(layer_id)
         self._rendered = True
 
 
@@ -298,9 +331,10 @@ class Category(Layer):
         Outline colour of each area as ``#RRGGBB`` (default from style).
     stroke_width : float, optional
         Outline width (default from style).
-    legend : dict, optional
+    legend : dict or False, optional
         Legend configuration (ChoroplethLegendConfig fields). Defaults to
-        a vertical legend with one swatch per category.
+        a vertical legend with one swatch per category. ``False`` draws no
+        legend.
     dissolve : bool, optional
         Merge adjacent areas that share a category before drawing
         (default False).
@@ -421,6 +455,7 @@ class Category(Layer):
                 "Category(gdf, column='cluster', "
                 "fill_map={'A': '#1f78b4', 'B': '#33a02c'})."
             )
+        _require_column(self, self.params["column"])
         opacity_column = self.params.get("opacity_column")
         if (opacity_column is not None and self.gdf is not None
                 and opacity_column not in getattr(self.gdf, "columns", ())):
@@ -442,7 +477,7 @@ class Category(Layer):
         cfg = dict(self.params)
         column = cfg.pop("column")
         layer_id = _add_category(
-            ctx.map, self.gdf,
+            ctx.map, ctx.map._in_map_crs(self.gdf),
             column=column,
             fill_map=cfg.pop("fill_map"),
             default_fill=cfg.pop("default_fill", None),
@@ -463,14 +498,20 @@ class Category(Layer):
             detail_join=cfg.pop("detail_join", None),
             border_contrast=cfg.pop("border_contrast", None),
         )
+        self.report = ctx.map._state.classification_reports.get(layer_id)
+        tip_gdf = self.gdf
+        if self.params.get("dissolve") and self.report is not None:
+            default_label = self.params.get("default_label", "Autre")
+            tip_gdf = _class_tooltip_frame(column, [
+                default_label if c == "__default__" else str(c)
+                for c in self.report.categories])
         ctx.map._state.interactive_layers.append({
             "type": "category",
-            "gdf": self.gdf,
+            "gdf": tip_gdf,
             "column": column,
             "layer_id": layer_id,
-            "id_prefix": f"category-{layer_id}-",
+            "id_prefix": f"choro-{layer_id}-",
         })
-        self.report = ctx.map._state.classification_reports.get(layer_id)
         self._rendered = True
 
 
@@ -503,8 +544,9 @@ class Proportional(Layer):
     reference_radius : float, optional
         Radius in pixels for ``reference_value``. Defaults to
         ``max_radius``.
-    legend : dict, optional
+    legend : dict or False, optional
         Legend configuration (see :class:`ProportionalLegendConfig`).
+        ``False`` draws no legend.
     on_zoom : bool, optional
         Draw on the zoom viewport (default True).
     on_cartouches : bool, optional
@@ -584,13 +626,15 @@ class Proportional(Layer):
                 "numeric column that drives symbol size, e.g. "
                 "Proportional(gdf, column='population')."
             )
+        _require_column(self, self.params["column"])
+        _require_column(self, self.params.get("fill_column"), "fill_column")
 
     def render(self, ctx: RenderContext) -> None:
         from ..proportional import add_proportional as _add_proportional
         cfg = dict(self.params)
         column = cfg.pop("column")
         layer_id = _add_proportional(
-            ctx.map, self.gdf,
+            ctx.map, ctx.map._in_map_crs(self.gdf),
             column=column,
             fill=cfg.pop("fill", D.PROPORTIONAL_FILL),
             fill_opacity=cfg.pop("fill_opacity", D.PROPORTIONAL_FILL_OPACITY),
@@ -648,8 +692,9 @@ class Situation(Layer):
         Outline colour of the inner marker.
     label : str, optional
         Column holding a short text drawn next to each marker.
-    legend : dict, optional
+    legend : dict or False, optional
         Legend configuration (see :class:`SituationLegendConfig`).
+        ``None`` or ``False`` draws no legend.
     on_zoom : bool, optional
         Draw on the zoom viewport (default True).
     on_cartouches : bool, optional
@@ -731,9 +776,10 @@ class Situation(Layer):
     def render(self, ctx: RenderContext) -> None:
         from ..situation import add_situation as _add_situation
         cfg = dict(self.params)
+        column = cfg.pop("column", None)
         layer_id = _add_situation(
-            ctx.map, self.gdf,
-            column=cfg.pop("column", None),
+            ctx.map, ctx.map._in_map_crs(self.gdf),
+            column=column,
             symbol=cfg.pop("symbol", None),
             marker=cfg.pop("marker", "circle"),
             fill=cfg.pop("fill", "#e31a1c"),
@@ -753,7 +799,7 @@ class Situation(Layer):
         ctx.map._state.interactive_layers.append({
             "type": "situation",
             "gdf": self.gdf,
-            "column": cfg.get("column"),
+            "column": column,
             "layer_id": layer_id,
             "id_prefix": f"situ-{layer_id}-",
         })
@@ -969,6 +1015,8 @@ class Label(Layer):
                 "column to label with, e.g. "
                 "Label(gdf, column='name')."
             )
+        _require_column(self, self.params["column"])
+        _require_column(self, self.params.get("priority_col"), "priority_col")
 
     def render(self, ctx: RenderContext) -> None:
         params = dict(self.params)
@@ -1063,5 +1111,5 @@ class Vector(Layer):
         # A raised z_index lifts the layer above the data, like position="top".
         if self.z_index > 0 and "z" not in params and "position" not in params:
             params["position"] = "top"
-        ctx.map._render_vector(self.gdf, params)
+        ctx.map._render_vector(ctx.map._in_map_crs(self.gdf), params)
         self._rendered = True

@@ -156,9 +156,11 @@ class Raster(Layer):
 
     Parameters
     ----------
-    paths : dict
-        Mapping of region name to GeoTIFF path (required). Each viewport
-        picks the raster whose footprint overlaps its bbox.
+    paths : dict or str
+        Mapping of region name to GeoTIFF path, or a single path
+        (required). Each viewport picks the raster whose footprint overlaps
+        its bbox. Rasters must be in the map CRS; they are resampled to the
+        viewport resolution and their no-data pixels are transparent.
     opacity : float, optional
         Raster opacity in ``[0, 1]`` (default 1).
     on_zoom : bool, optional
@@ -343,7 +345,7 @@ class DropShadow(Layer):
         )
 
     def render(self, ctx: RenderContext) -> None:
-        ctx.map._render_shadow(self.gdf, dict(self.params))
+        ctx.map._render_shadow(ctx.map._in_map_crs(self.gdf), dict(self.params))
         self._rendered = True
 
 
@@ -428,5 +430,5 @@ class OceanGradient(Layer):
             )
 
     def render(self, ctx: RenderContext) -> None:
-        ctx.map._render_ocean_gradient(self.gdf, dict(self.params))
+        ctx.map._render_ocean_gradient(ctx.map._in_map_crs(self.gdf), dict(self.params))
         self._rendered = True

@@ -30,6 +30,7 @@ Example
 from __future__ import annotations
 
 import base64
+import hashlib
 import io
 import math
 import pathlib
@@ -208,6 +209,11 @@ def _auto_zoom(west: float, east: float, map_width_px: float,
 def _cache_path_for(cache_dir: pathlib.Path, provider_key: str,
                     z: int, x: int, y: int) -> pathlib.Path:
     safe = provider_key.replace("://", "_").replace("/", "_")[:40]
+    if provider_key not in TILE_PROVIDERS:
+        # A URL template: the readable prefix alone is ambiguous (two
+        # templates of one server share it), a digest tells them apart.
+        digest = hashlib.sha1(provider_key.encode("utf-8")).hexdigest()[:10]
+        safe = f"{safe}-{digest}"
     return cache_dir / safe / str(z) / str(x) / f"{y}.png"
 
 

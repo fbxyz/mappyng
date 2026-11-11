@@ -7,7 +7,11 @@ Embeds GeoTIFF files (MNT, relief, satellite imagery...) as base64 PNG
 The raster must share the same CRS as the viewport it is rendered in.
 No reprojection is performed, the GeoTIFF is windowed (cropped) to
 the viewport's geographic bounds and placed at the correct SVG
-coordinates.
+coordinates. A raster in another CRS is skipped with a warning.
+
+The image is resampled down to the resolution the viewport can show,
+pixels without data are transparent, and rasters that are not 8-bit
+(elevation models, 16-bit images) are stretched to the 0-255 range.
 
 Multiple raster files can be supplied so that each viewport (main map,
 cartouches, zoom) picks the one whose footprint overlaps its bbox.
@@ -31,11 +35,14 @@ Example
 from __future__ import annotations
 
 import base64
+import os
 import struct
+import warnings
 import zlib
 
 import numpy as np
 import rasterio
+from rasterio.enums import Resampling
 from rasterio.windows import from_bounds as window_from_bounds
 
 from . import defaults as D
@@ -56,11 +63,24 @@ def _raster_overlaps_bbox(
 def _read_window_png(
     ds: rasterio.DatasetReader,
     bbox: list[float],
+    max_size: tuple[int, int] | None = None,
 ) -> tuple[bytes | None, tuple[float, float, float, float]]:
     """Read the portion of *ds* that intersects *bbox* and return PNG bytes.
 
+    Parameters
+    ----------
+    ds : rasterio dataset
+        The opened raster.
+    bbox : list of float
+        Geographic window to read, in the raster CRS.
+    max_size : (width, height), optional
+        Largest useful image size in pixels. A window with more pixels is
+        resampled down to it while reading, so a large raster does not bloat
+        the SVG.
+
     Returns (png_bytes, actual_bounds) or (None, ...) if no overlap.
     *actual_bounds* is (minx, miny, maxx, maxy) of the actual window read.
+    Pixels without data (nodata value, mask or alpha band) are transparent.
     """
     rb = ds.bounds
 
@@ -96,28 +116,75 @@ def _read_window_png(
     # bounds returns (left, bottom, right, top)
     act_minx, act_miny, act_maxx, act_maxy = actual_bounds
 
-    # Read bands
-    bands = ds.read(window=int_window)  # shape: (bands, h, w)
+    # Resample down while reading when the window holds more pixels than
+    # the viewport can show.
+    out_h, out_w = win_h, win_w
+    if max_size is not None:
+        ratio = max(win_w / max(max_size[0], 1), win_h / max(max_size[1], 1))
+        if ratio > 1:
+            out_w = max(1, round(win_w / ratio))
+            out_h = max(1, round(win_h / ratio))
+    resampled = (out_h, out_w) != (win_h, win_w)
+    bands = ds.read(
+        window=int_window, out_shape=(ds.count, out_h, out_w),
+        resampling=Resampling.average if resampled else Resampling.nearest,
+    )  # shape: (bands, h, w)
+    mask = ds.dataset_mask(window=int_window, out_shape=(out_h, out_w))
 
-    # Build RGBA or RGB PNG via PIL-free approach (raw PNG with numpy)
-    png_bytes = _array_to_png(bands)
+    png_bytes = _array_to_png(_to_uint8(bands, mask), mask)
     return png_bytes, (act_minx, act_miny, act_maxx, act_maxy)
 
 
-def _array_to_png(bands: np.ndarray) -> bytes:
+def _to_uint8(bands: np.ndarray, mask: np.ndarray | None = None) -> np.ndarray:
+    """Return *bands* as uint8, stretching other data types to 0-255.
+
+    Rasters that are not 8-bit (an elevation model in metres, a 16-bit
+    image...) are stretched linearly from the lowest to the highest valid
+    value, all bands together so the colours keep their balance. Pixels
+    masked out by *mask* (0 = no data) and non-finite values are ignored
+    when looking for the range.
+    """
+    if bands.dtype == np.uint8:
+        return bands
+    data = bands.astype(np.float64)
+    valid = np.isfinite(data)
+    if mask is not None:
+        valid &= (mask > 0)[None, :, :]
+    if not valid.any():
+        return np.zeros(bands.shape, dtype=np.uint8)
+    lo, hi = float(data[valid].min()), float(data[valid].max())
+    if hi <= lo:
+        return np.where(valid, 255, 0).astype(np.uint8)
+    scaled = np.clip((data - lo) / (hi - lo), 0.0, 1.0) * 255.0
+    return np.where(valid, np.round(scaled), 0).astype(np.uint8)
+
+
+def _array_to_png(bands: np.ndarray, mask: np.ndarray | None = None) -> bytes:
     """Convert a (bands, h, w) uint8 array to PNG bytes.
 
-    Supports 1-band (grayscale), 3-band (RGB) and 4-band (RGBA) input; any
-    other band count keeps the first three bands. The PNG is encoded with
-    :mod:`zlib` only, so no imaging library is needed.
+    Supports 1-band (grayscale), 2-band (grayscale + alpha), 3-band (RGB)
+    and 4-band (RGBA) input; any other band count keeps the first three
+    bands. *mask* is an optional (h, w) array where 0 marks pixels without
+    data: they become transparent. The PNG is encoded with :mod:`zlib`
+    only, so no imaging library is needed.
     """
-    if bands.shape[0] == 1:
-        img = np.repeat(np.transpose(bands, (1, 2, 0)), 3, axis=2)
-    elif bands.shape[0] in (3, 4):
-        img = np.transpose(bands, (1, 2, 0))
+    bands = bands.astype(np.uint8)
+    count = bands.shape[0]
+    alpha = None
+    if count in (1, 2):
+        rgb = np.repeat(bands[:1], 3, axis=0)
+        if count == 2:
+            alpha = bands[1]
     else:
-        img = np.transpose(bands[:3], (1, 2, 0))
-    img = np.ascontiguousarray(img.astype(np.uint8))
+        rgb = bands[:3]
+        if count == 4:
+            alpha = bands[3]
+    if mask is not None and (mask == 0).any():
+        opaque = np.where(mask > 0, 255, 0).astype(np.uint8)
+        alpha = opaque if alpha is None else np.minimum(alpha, opaque)
+    if alpha is not None:
+        rgb = np.concatenate([rgb, alpha[None]], axis=0)
+    img = np.ascontiguousarray(np.transpose(rgb, (1, 2, 0)))
     height, width, channels = img.shape
     color_type = 6 if channels == 4 else 2
 
@@ -169,6 +236,26 @@ def _place_raster(
     )
 
 
+def _same_crs(a, b) -> bool:
+    """Whether two CRS objects (rasterio, pyproj...) describe the same CRS."""
+    from pyproj import CRS
+    try:
+        return CRS.from_user_input(a) == CRS.from_user_input(b)
+    except Exception:  # noqa: BLE001 - unreadable CRS: do not block drawing
+        return True
+
+
+def _crs_name(crs) -> str:
+    """Short readable name of a CRS (``EPSG:2154`` when it has a code)."""
+    from pyproj import CRS
+    try:
+        parsed = CRS.from_user_input(crs)
+        code = parsed.to_epsg()
+        return f"EPSG:{code}" if code else parsed.name
+    except Exception:  # noqa: BLE001
+        return str(crs)
+
+
 def _find_matching_raster(
     raster_datasets: dict[str, rasterio.DatasetReader],
     bbox: list[float],
@@ -186,7 +273,7 @@ def _find_matching_raster(
 
 def add_raster(
     map_obj,
-    paths: dict[str, str],
+    paths: dict[str, str] | str,
     opacity: float = 1.0,
     on_zoom: bool = True,
     on_cartouches: bool = True,
@@ -198,8 +285,8 @@ def add_raster(
     ----------
     map_obj : mappyng.Map
         The map instance.
-    paths : dict
-        Mapping of region names to GeoTIFF file paths.
+    paths : dict or str
+        Mapping of region names to GeoTIFF file paths, or a single path.
         Each viewport (main, cartouche, zoom) picks the raster whose
         geographic footprint overlaps its bbox.  Example::
 
@@ -220,12 +307,37 @@ def add_raster(
         layer; a larger value lifts it above lower layers.
     """
     z_order = D.Z_RASTER if z is None else z
+    if isinstance(paths, (str, os.PathLike)):
+        paths = {"raster": paths}
+    if not isinstance(paths, dict) or not paths:
+        raise ValueError(
+            f"Raster: paths must be a GeoTIFF path or a dict mapping a name "
+            f"to a GeoTIFF path, got {paths!r}."
+        )
+    for key, path in paths.items():
+        if not os.path.exists(path):
+            raise FileNotFoundError(
+                f"Raster: the file for {key!r} does not exist: {path}"
+            )
 
     # Open all raster files
     datasets: dict[str, rasterio.DatasetReader] = {}
     try:
+        map_crs = map_obj.gdf.crs
         for key, path in paths.items():
-            datasets[key] = rasterio.open(path)
+            ds = rasterio.open(path)
+            if (ds.crs is not None and map_crs is not None
+                    and not _same_crs(ds.crs, map_crs)):
+                ds.close()
+                warnings.warn(
+                    f"Raster {key!r} is in {_crs_name(ds.crs)} but the map "
+                    f"is in {_crs_name(map_crs)}. Rasters are not "
+                    f"reprojected, so it is not drawn. Reproject the file to "
+                    f"the map CRS first (for example with gdalwarp).",
+                    UserWarning, stacklevel=2,
+                )
+                continue
+            datasets[key] = ds
 
         # --- Main viewport ---
         _render_raster_on_viewport(
@@ -265,7 +377,12 @@ def _render_raster_on_viewport(
         return
 
     ds = datasets[key]
-    png_bytes, actual_bounds = _read_window_png(ds, bbox)
+    vb = viewport.viewbox
+    max_size = (
+        max(1, round(vb.content_width * D.RASTER_PIXEL_RATIO)),
+        max(1, round(vb.content_height * D.RASTER_PIXEL_RATIO)),
+    )
+    png_bytes, actual_bounds = _read_window_png(ds, bbox, max_size)
     if png_bytes is None:
         return
 

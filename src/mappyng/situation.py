@@ -42,6 +42,9 @@ from .legend import (
     draw_legend_frame,
     draw_legend_subtitle,
     draw_legend_title,
+    make_legend_config,
+    record_legend,
+    stack_legend,
 )
 from .renderer import SvgViewport
 
@@ -216,6 +219,50 @@ def _parse_marker(marker: Any) -> list[str]:
             return [m.strip() for m in marker.split("+")]
         return [marker]
     return [SITUATION_DEFAULT_MARKER]
+
+
+def _category_key(value: Any) -> str:
+    """Text key of a category value, the same for ``1``, ``1.0`` and ``"1"``.
+
+    A column of whole numbers is often stored as floats (as soon as it has
+    a missing value), while the ``symbol`` dict is keyed with integers.
+    """
+    if isinstance(value, bool):
+        return str(value)
+    try:
+        if float(value) == int(float(value)) and not isinstance(value, str):
+            return str(int(float(value)))
+    except (TypeError, ValueError, OverflowError):
+        pass
+    return str(value)
+
+
+def _check_markers(categories: dict[str, MarkerConfig]) -> None:
+    """Warn about marker names that will be drawn as a plain circle."""
+    unknown: list[str] = []
+    missing_files: list[str] = []
+    for cfg in categories.values():
+        for shape in cfg.shapes:
+            if shape in _SHAPE_BUILDERS:
+                continue
+            if _is_svg_file(str(shape)):
+                if not Path(shape).exists() and shape not in missing_files:
+                    missing_files.append(shape)
+            elif shape not in unknown:
+                unknown.append(shape)
+    if unknown:
+        warnings.warn(
+            f"Situation: unknown marker(s) {unknown}, drawn as circles. "
+            f"Available markers: {sorted(_SHAPE_BUILDERS)}, or the path of "
+            f"an .svg file.",
+            UserWarning, stacklevel=3,
+        )
+    if missing_files:
+        warnings.warn(
+            f"Situation: marker file(s) not found: {missing_files}. The "
+            f"points are drawn as circles instead.",
+            UserWarning, stacklevel=3,
+        )
 
 
 def _is_svg_file(name: str) -> bool:
@@ -496,8 +543,9 @@ def _draw_situation_legend(
         return
 
     lp = dict(legend_params)
-    sit_cfg = SituationLegendConfig(**lp)
+    sit_cfg = make_legend_config(SituationLegendConfig, lp, "Situation legend")
     sit_cfg.resolve_defaults(map_obj.style, font_scale=getattr(map_obj, "font_scale", 1.0))
+    stacked = stack_legend(map_obj, sit_cfg)
     frame_cfg = _parse_frame_config(sit_cfg.frame)
 
     font_size = sit_cfg.fontsize or D.LEGEND_FONT_SIZE
@@ -579,7 +627,9 @@ def _draw_situation_legend(
             frame_cfg,
         )
 
-    return (legend_x, legend_y, legend_x + content_w, legend_y + content_h)
+    bbox = (legend_x, legend_y, legend_x + content_w, legend_y + content_h)
+    record_legend(map_obj, stacked, bbox)
+    return bbox
 
 
 # ============================================================================
@@ -658,7 +708,21 @@ def add_situation(
         # Categorical mode. The >N-categories readability check lives
         # in Situation.validate(), emitted at construction.
         for cat_value, sym_dict in symbol.items():
-            categories[str(cat_value)] = _parse_symbol_config(sym_dict)
+            categories[_category_key(cat_value)] = _parse_symbol_config(sym_dict)
+        if column in gdf.columns:
+            present = {_category_key(v) for v in gdf[column].dropna().unique()}
+            unmapped = sorted(present - set(categories))
+            if unmapped:
+                shown = ", ".join(repr(c) for c in unmapped[:5])
+                more = (f" and {len(unmapped) - 5} more"
+                        if len(unmapped) > 5 else "")
+                warnings.warn(
+                    f"Situation: {len(unmapped)} value(s) of {column!r} have "
+                    f"no entry in symbol ({shown}{more}). Their points are "
+                    f"drawn with a red cross. Add them to symbol, or filter "
+                    f"the data.",
+                    UserWarning, stacklevel=2,
+                )
     else:
         # Uniform mode, single marker for all points
         shapes = _parse_marker(marker)
@@ -670,6 +734,7 @@ def add_situation(
             label=label,
         )
         categories["__all__"] = default_cfg
+    _check_markers(categories)
 
     layer_name = f"situation_{layer_id}"
     z = D.Z_SITUATION
@@ -716,7 +781,7 @@ def add_situation(
                 )
 
     # --- Legend ---
-    if legend_params is not None:
+    if legend_params is not None and legend_params is not False:
         legend_cats = {k: v for k, v in categories.items() if k != "__all__"}
         if not legend_cats and "__all__" in categories:
             cfg = categories["__all__"]
@@ -767,7 +832,7 @@ def _draw_situation_on_viewport(
 
         # Determine category
         if column and column in row.index:
-            cat = str(row[column])
+            cat = _category_key(row[column])
         else:
             cat = "__all__"
 

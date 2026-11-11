@@ -185,6 +185,9 @@ SOURCE_POSITION = None
 # ============================================================================
 
 RASTER_ALPHA = 1.0
+RASTER_PIXEL_RATIO = 2.0
+"""Raster pixels kept per SVG pixel of the viewport; larger rasters are
+resampled down to this density when embedded."""
 """Default raster opacity (0-1)."""
 
 SHADOW_DX = 1.5
@@ -323,6 +326,8 @@ LEGEND_SWATCH_ROUNDED_RATIO = 0.25
 """Default corner radius of "rounded" swatches, as a share of the shorter side."""
 LEGEND_NODATA_LABEL = "N/A"
 LEGEND_BELOW_MAP_GAP = 20
+LEGEND_STACK_GAP = 14
+"""Vertical gap (SVG px) between two legends stacked automatically."""
 """Vertical gap between map content bottom and legend top (pixels)."""
 LEGEND_NODATA_GAP = 25
 """Horizontal gap between last swatch and N/A indicator (pixels)."""
@@ -476,6 +481,9 @@ with CHOROPLETH_STOCK_MAGNITUDE_WARN; both must hold to flag a column."""
 # Export raster/PDF
 EXPORT_DEFAULT_DPI = 96
 """Default DPI for PNG export via cairosvg (extra mappyng[export])."""
+
+SVG_REFERENCE_DPI = 96
+"""Resolution at which one SVG pixel is one image pixel (CSS reference)."""
 
 # ============================================================================
 # Z-order, layer stacking (higher = on top)

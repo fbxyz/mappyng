@@ -60,7 +60,12 @@ from .choropleth_legend import (  # noqa: F401 - re-exported for compatibility
 )
 from .config import alpha_blend_hex
 from .detail import ZOOM, detail_for, join_detail, normalize_detail
-from .legend import ensure_hatch_pattern
+from .legend import (
+    ensure_hatch_pattern,
+    make_legend_config,
+    record_legend,
+    stack_legend,
+)
 from .renderer import SvgViewport, geometry_to_paths
 
 # ============================================================================
@@ -130,6 +135,28 @@ def _simplify_gdf(gdf: gpd.GeoDataFrame, simplify,
     return out
 
 
+def _class_index(frame: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    """Index a dissolved frame by class: ``class0``, ``class1``...
+
+    A dissolved polygon stands for a whole class, not for a row of the
+    data: its element id names the class, so nothing (a tooltip, a script)
+    mistakes it for the feature that happens to share its row number.
+    """
+    frame.index = ["class" + str(int(c)) for c in frame["_class"]]
+    return frame
+
+
+def _opacity_fraction(value: Any) -> float:
+    """Clamp an opacity-column value to ``[0, 1]``; a missing value is 0."""
+    try:
+        p = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    if p != p:  # NaN
+        return 0.0
+    return min(max(p, 0.0), 1.0)
+
+
 def _draw_classified_gdf(
     viewport: SvgViewport,
     gdf: gpd.GeoDataFrame,
@@ -150,7 +177,7 @@ def _draw_classified_gdf(
     """Render classified polygons as SVG paths with semantic attributes.
 
     With *opacity_column*, each feature's probability (clipped to
-    ``[0, 1]``) is mapped linearly onto ``[min_opacity, max_opacity]``. With
+    ``[0, 1]``, a missing value counting as 0) is mapped linearly onto ``[min_opacity, max_opacity]``. With
     *blend_background* set, that opacity is pre-composited into a solid
     colour (deterministic regardless of what renders underneath); otherwise
     it is emitted as native SVG ``fill-opacity`` (blends live with whatever
@@ -184,7 +211,7 @@ def _draw_classified_gdf(
         }
 
         if opacity_column is not None:
-            p = min(max(float(row[opacity_column]), 0.0), 1.0)
+            p = _opacity_fraction(row[opacity_column])
             alpha = min_opacity + p * (max_opacity - min_opacity)
             if blend_background is not None:
                 attrs["fill"] = alpha_blend_hex(fill, blend_background, alpha)
@@ -378,13 +405,15 @@ def add_choropleth(
     instead. The rendering always proceeds.
     """
     layer_id = map_obj._next_layer_id("choropleth")
+    if not isinstance(method, str):
+        method = list(method)  # custom breaks: any sequence
 
     # The stock-data semiology check lives in
     # Choropleth.validate(), emitted once at layer construction.
 
     style = map_obj.style
     stroke = stroke or style["edge_color"]
-    sw = stroke_width or style["edge_width"]
+    sw = style["edge_width"] if stroke_width is None else stroke_width
     z = style.config.z_order.CHOROPLETH
     border_cfg = parse_border_contrast(border_contrast)
 
@@ -407,7 +436,8 @@ def add_choropleth(
     if isinstance(legend_params, ChoroplethLegendConfig):
         legend_cfg = copy.copy(legend_params)
     else:
-        legend_cfg = ChoroplethLegendConfig(**(legend_params or {}))
+        legend_cfg = make_legend_config(
+            ChoroplethLegendConfig, legend_params, "Choropleth legend")
     legend_cfg.resolve_defaults(style, font_scale=getattr(map_obj, "font_scale", 1.0))
 
     if method == "PrettyBreaks":
@@ -498,6 +528,7 @@ def add_choropleth(
                 ).reset_index()
             else:
                 frame = frame.dissolve(by="_class").reset_index()
+            frame = _class_index(frame)
 
         # Assign colors
         frame["_color"] = frame["_class"].map(lambda c: colors[c])
@@ -581,10 +612,14 @@ def add_choropleth(
     if not show_legend:
         pass
     elif isinstance(legend_cfg, FactorLegend):
-        _draw_factor_legend(map_obj.svg, colors, bins, legend_cfg,
-                            not nodata.empty, map_obj.main, map_obj)
+        stacked = stack_legend(map_obj, legend_cfg)
+        record_legend(map_obj, stacked, _draw_factor_legend(
+            map_obj.svg, colors, bins, legend_cfg,
+            not nodata.empty, map_obj.main, map_obj))
     else:
-        _draw_legend(map_obj.svg, colors, bins, legend_cfg, not nodata.empty,
-                     map_obj.main, map_obj, values=hist_values)
+        stacked = stack_legend(map_obj, legend_cfg)
+        record_legend(map_obj, stacked, _draw_legend(
+            map_obj.svg, colors, bins, legend_cfg, not nodata.empty,
+            map_obj.main, map_obj, values=hist_values))
 
     return layer_id

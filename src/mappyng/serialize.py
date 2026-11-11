@@ -152,6 +152,26 @@ def _require_yaml():
         ) from e
 
 
+def _yaml_key(key: Any) -> Any:
+    """Coerce a mapping key to a YAML scalar, keeping its type.
+
+    Numbers and booleans stay what they are: a ``fill_map`` keyed by
+    integer categories must still match the integers of the data once
+    reloaded. Anything else becomes its string form.
+    """
+    if isinstance(key, (bool, int, float, str)):
+        return key
+    item = getattr(key, "item", None)  # numpy scalar to python scalar
+    if callable(item):
+        try:
+            value = item()
+        except (TypeError, ValueError):
+            value = None
+        if isinstance(value, (bool, int, float, str)):
+            return value
+    return str(key)
+
+
 def _yaml_safe(obj: Any) -> Any:
     """Coerce a value to YAML-native types, or raise in plain language.
 
@@ -163,7 +183,7 @@ def _yaml_safe(obj: Any) -> Any:
     if obj is None or isinstance(obj, (bool, int, float, str)):
         return obj
     if isinstance(obj, dict):
-        return {str(k): _yaml_safe(v) for k, v in obj.items()}
+        return {_yaml_key(k): _yaml_safe(v) for k, v in obj.items()}
     if isinstance(obj, (list, tuple)):
         return [_yaml_safe(v) for v in obj]
     item = getattr(obj, "item", None)  # numpy scalar to python scalar
@@ -188,6 +208,8 @@ def map_to_dict(m: Any) -> dict[str, Any]:
         "style": _yaml_safe(m._style_arg),
         "seed": m._seed,
     }
+    if not m._font_scale_auto:
+        map_cfg["font_scale"] = m.font_scale
     # Carry simple appearance overrides when explicitly set.
     if m.facecolor is not None:
         map_cfg["facecolor"] = m.facecolor
@@ -333,7 +355,7 @@ def map_from_dict(doc: dict[str, Any], gdf: Any = None,
     # Forward the remaining constructor options only when present, so each
     # keeps its own default otherwise.
     for key in ("bbox", "padding", "border_radius", "box_shadow", "glow",
-                "basemap_color", "cartouche_spacing"):
+                "basemap_color", "cartouche_spacing", "font_scale"):
         if key in cfg:
             map_kwargs[key] = cfg[key]
     if cartouche_params is not None:
@@ -510,6 +532,13 @@ def from_yaml(source: str, gdf: Any = None,
         with open(source, encoding="utf-8") as fh:
             text = fh.read()
     else:
+        if (isinstance(source, str) and "\n" not in source
+                and source.strip().lower().endswith((".yaml", ".yml"))):
+            raise FileNotFoundError(
+                f"from_yaml: no such file {source!r}. Check the path; a "
+                f"relative one is resolved from the current directory "
+                f"({os.getcwd()!r})."
+            )
         text = source
     doc = yaml.safe_load(text)
     if not isinstance(doc, dict):
