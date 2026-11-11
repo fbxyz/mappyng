@@ -152,7 +152,8 @@ def _to_uint8(bands: np.ndarray, mask: np.ndarray | None = None) -> np.ndarray:
         valid &= (mask > 0)[None, :, :]
     if not valid.any():
         return np.zeros(bands.shape, dtype=np.uint8)
-    lo, hi = float(data[valid].min()), float(data[valid].max())
+    values = data[valid]
+    lo, hi = float(np.min(values)), float(np.max(values))
     if hi <= lo:
         return np.where(valid, 255, 0).astype(np.uint8)
     scaled = np.clip((data - lo) / (hi - lo), 0.0, 1.0) * 255.0
