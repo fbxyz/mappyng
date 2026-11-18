@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `Proportional(color_column=...)`: circles coloured by the classes of a second column (`cmap`, `method`, `num_classes`, `reverse`), with their own legend (`color_legend`), as a choropleth inside the circles.
+
 ## 1.0.1 (2026-11-11)
 
 ### Fixed

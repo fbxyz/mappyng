@@ -41,8 +41,9 @@ def _normalize_params(params: dict[str, Any]) -> dict[str, Any]:
     from ..elements import Legend
 
     out = dict(params)
-    if isinstance(out.get("legend"), Legend):
-        out["legend"] = out["legend"].to_dict()
+    for key in ("legend", "color_legend"):
+        if isinstance(out.get(key), Legend):
+            out[key] = out[key].to_dict()
     if isinstance(out.get("border_contrast"), BorderContrast):
         out["border_contrast"] = out["border_contrast"].to_dict()
     return out

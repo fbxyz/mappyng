@@ -31,6 +31,7 @@ import numpy as np
 from shapely.geometry import MultiPoint, Point, box
 
 from . import defaults as D
+from .choropleth_legend import _draw_legend as _draw_choropleth_legend
 from .detail import ZOOM, detail_for, join_detail, normalize_detail
 from .legend import (
     BaseLegendConfig,
@@ -513,6 +514,12 @@ def add_proportional(
     on_cartouches: bool = True,
     fill_column: str | None = None,
     fill_map: dict[Any, str] | None = None,
+    color_column: str | None = None,
+    cmap: str | list[str] = D.CHOROPLETH_DEFAULT_CMAP,
+    reverse: bool = False,
+    method: str | list = D.CHOROPLETH_DEFAULT_METHOD,
+    num_classes: int = D.CHOROPLETH_DEFAULT_NUM_CLASSES,
+    color_legend: dict[str, Any] | None = None,
     detail: Any = None,
     detail_join: Any = None,
 ) -> int:
@@ -557,6 +564,16 @@ def add_proportional(
     fill_map : dict, optional
         Mapping ``category -> colour`` used with *fill_column*. Categories absent
         from the mapping fall back to *fill*.
+    color_column : str, optional
+        Numeric column classified like a choropleth (*method*, *num_classes*)
+        to colour each circle with its class colour from *cmap*. Circles
+        without a value keep *fill*. Exclusive with *fill_column*.
+    cmap, reverse, method, num_classes
+        Classification of *color_column*, as in
+        :func:`~mappyng.choropleth.add_choropleth`.
+    color_legend : dict or False, optional
+        Legend of the colour classes (see ChoroplethLegendConfig fields).
+        ``False`` draws no colour legend.
     detail : GeoDataFrame or dict, optional
         Finer geometry for the zoom window and the cartouches: the circles
         are placed from it instead of from *gdf*, and keep the values and
@@ -581,6 +598,18 @@ def add_proportional(
     # (survives clipping/cartouche subsetting) and read back in _draw_circles.
     if fill_column is not None and fill_map is not None:
         data[_FILL_COL] = data[fill_column].map(fill_map).fillna(fill)
+
+    # Choropleth colouring: classify color_column and give each circle the
+    # colour of its class. Same classification as a Choropleth layer.
+    color_classes = None
+    if color_column is not None:
+        color_classes = _classify_colors(
+            map_obj, layer_id, data, color_column, cmap, reverse, method,
+            num_classes, color_legend)
+        data[_FILL_COL] = fill
+        classified, colors = color_classes[0], color_classes[1]
+        data.loc[classified.index, _FILL_COL] = [
+            colors[int(c)] for c in classified["_class"]]
 
     values = data[column].values
 
@@ -681,4 +710,51 @@ def add_proportional(
         map_obj.overflow.register(*legend_bbox)
         record_legend(map_obj, stacked, legend_bbox)
 
+    if color_classes is not None and color_legend is not False:
+        classified, colors, bins, nodata, color_cfg = color_classes
+        stacked = stack_legend(map_obj, color_cfg)
+        record_legend(map_obj, stacked, _draw_choropleth_legend(
+            map_obj.svg, colors, bins, color_cfg, not nodata.empty,
+            map_obj.main, map_obj,
+            values=classified[color_column].to_numpy(dtype=float)))
+
     return layer_id
+
+
+def _classify_colors(map_obj, layer_id: int, data: gpd.GeoDataFrame,
+                     column: str, cmap: str | list[str], reverse: bool,
+                     method: str | list, num_classes: int,
+                     legend_params: Any) -> tuple:
+    """Classify *column* for the circle colours, as a Choropleth would.
+
+    Records the classification report under *layer_id* and returns
+    ``(classified, colors, bins, nodata, legend_config)``.
+    """
+    from .choropleth_classify import (
+        _resolve_colors_with_fallback,
+        _resolve_num_classes,
+        build_report,
+        classify,
+    )
+    from .choropleth_legend import ChoroplethLegendConfig
+
+    legend_cfg = make_legend_config(
+        ChoroplethLegendConfig,
+        None if legend_params is False else legend_params,
+        "Proportional colour legend")
+    legend_cfg.resolve_defaults(
+        map_obj.style, font_scale=getattr(map_obj, "font_scale", 1.0))
+
+    k = _resolve_num_classes(method, num_classes)
+    classified, nodata, scheme, bins = classify(
+        data, column, method=method, num_classes=k,
+        decimals=legend_cfg.decimals)
+    k_real = len(bins) - 1
+    colors = (list(cmap[:k_real]) if isinstance(cmap, list)
+              else _resolve_colors_with_fallback(cmap, k_real))
+    if reverse:
+        colors = list(reversed(colors))
+    map_obj._state.classification_reports[layer_id] = build_report(
+        column, method, num_classes, k, classified, nodata, bins, [],
+        cmap=cmap, colors=colors)
+    return classified, colors, bins, nodata, legend_cfg

@@ -558,6 +558,22 @@ class Proportional(Layer):
     fill_map : dict, optional
         Mapping ``category -> colour`` used with *fill_column*; unmapped
         categories fall back to *fill*.
+    color_column : str, optional
+        Numeric column classified like a :class:`Choropleth` to colour each
+        circle with its class colour, e.g. a rate inside circles sized by a
+        stock. Circles without a value keep *fill*, which also fills the size
+        legend. Exclusive with *fill_column*.
+    cmap : str or list, optional
+        Colour ramp of the *color_column* classes (as in :class:`Choropleth`).
+    reverse : bool, optional
+        Reverse the colour order (default False).
+    method : str or list, optional
+        Classification scheme of *color_column* (as in :class:`Choropleth`).
+    num_classes : int, optional
+        Number of classes of *color_column* (default 5).
+    color_legend : dict or False, optional
+        Legend of the colour classes (see :class:`ChoroplethLegendConfig`).
+        ``False`` draws no colour legend.
     detail : GeoDataFrame or dict, optional
         Finer geometry for the zoom window and the cartouches, used to
         place the circles instead of the generalised one. Values and
@@ -579,7 +595,14 @@ class Proportional(Layer):
     >>> m.add(Proportional(gdf, column="population", max_radius=30))
     >>> m.add(Proportional(gdf, column="n", fill_column="type",
     ...                         fill_map={"a": "#6A1B9A", "b": "#78909C"}))
+    >>> m.add(Proportional(gdf, column="population", color_column="rate",
+    ...                    cmap="Greens", method="FisherJenks",
+    ...                    color_legend=Legend("Rate (%)")))
     """
+
+    #: :class:`~mappyng.choropleth_classify.ClassificationReport` of the
+    #: *color_column* classes after render; ``None`` without *color_column*.
+    report = None
 
     kind = "proportional"
     requires_gdf = True
@@ -603,6 +626,12 @@ class Proportional(Layer):
         detail_join: Any = _UNSET,
         fill_column: Any = _UNSET,
         fill_map: Any = _UNSET,
+        color_column: Any = _UNSET,
+        cmap: Any = _UNSET,
+        reverse: Any = _UNSET,
+        method: Any = _UNSET,
+        num_classes: Any = _UNSET,
+        color_legend: Any = _UNSET,
         z_index: int = 0,
         visible: bool = True,
     ) -> None:
@@ -615,6 +644,9 @@ class Proportional(Layer):
                 reference_radius=reference_radius, legend=legend,
                 on_zoom=on_zoom, on_cartouches=on_cartouches,
                 fill_column=fill_column, fill_map=fill_map,
+                color_column=color_column, cmap=cmap, reverse=reverse,
+                method=method, num_classes=num_classes,
+                color_legend=color_legend,
                 detail=detail, detail_join=detail_join,
             ),
         )
@@ -628,6 +660,12 @@ class Proportional(Layer):
             )
         _require_column(self, self.params["column"])
         _require_column(self, self.params.get("fill_column"), "fill_column")
+        _require_column(self, self.params.get("color_column"), "color_column")
+        if (self.params.get("color_column") is not None
+                and self.params.get("fill_column") is not None):
+            raise ValueError(
+                "Proportional: give either fill_column (one colour per "
+                "category) or color_column (classified colours), not both.")
 
     def render(self, ctx: RenderContext) -> None:
         from ..proportional import add_proportional as _add_proportional
@@ -650,7 +688,14 @@ class Proportional(Layer):
             detail_join=cfg.pop("detail_join", None),
             fill_column=cfg.pop("fill_column", None),
             fill_map=cfg.pop("fill_map", None),
+            color_column=cfg.pop("color_column", None),
+            cmap=cfg.pop("cmap", D.CHOROPLETH_DEFAULT_CMAP),
+            reverse=cfg.pop("reverse", False),
+            method=cfg.pop("method", D.CHOROPLETH_DEFAULT_METHOD),
+            num_classes=cfg.pop("num_classes", D.CHOROPLETH_DEFAULT_NUM_CLASSES),
+            color_legend=cfg.pop("color_legend", None),
         )
+        self.report = ctx.map._state.classification_reports.get(layer_id)
         ctx.map._state.interactive_layers.append({
             "type": "proportional",
             "gdf": self.gdf,

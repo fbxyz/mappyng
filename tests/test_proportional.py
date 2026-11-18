@@ -224,3 +224,67 @@ class TestSingleRadiusScale:
                  if (c.get("id") or "").startswith("prop-")
                  and "legend" not in (c.get("id") or "")]
         assert max(radii) == pytest.approx(15.0, abs=0.01)
+
+
+# ============================================================================
+# Classified colours (color_column)
+# ============================================================================
+
+class TestColorColumn:
+    @staticmethod
+    def _points(gdf_departments):
+        pts = _make_point_gdf(gdf_departments)
+        # no circle below the minimum drawn radius
+        pts["pop"] = np.linspace(100_000, 1_000_000, len(pts))
+        pts["rate"] = np.linspace(0, 100, len(pts))
+        pts.loc[pts.index[50], "rate"] = np.nan
+        return pts
+
+    def _render(self, pts, **kwargs):
+        with Map(pts, width=800, height=600) as m:
+            m.add(Proportional(pts, column="pop", color_column="rate",
+                               cmap="Greens", method="Quantiles",
+                               num_classes=5, fill="#cccccc", **kwargs))
+        svg = ET.fromstring(m.to_string())
+        return m, svg
+
+    @staticmethod
+    def _circle_fills(svg):
+        return {int(c.get("id").rsplit("-", 1)[1]): c.get("fill")
+                for c in svg.iter("{http://www.w3.org/2000/svg}circle")
+                if (c.get("id") or "").startswith("prop-")}
+
+    def test_circles_take_their_class_colour(self, gdf_departments):
+        pts = self._points(gdf_departments)
+        m, svg = self._render(pts)
+        report = next(iter(m.classification_reports.values()))
+        fills = self._circle_fills(svg)
+        assert len(set(fills.values())) == len(report.colors) + 1
+        for idx, fill in fills.items():
+            rate = pts.loc[idx, "rate"]
+            if np.isnan(rate):
+                assert fill == "#cccccc"
+                continue
+            k = int(np.searchsorted(report.bins[1:-1], rate, side="left"))
+            assert fill == report.colors[k]
+
+    def test_colour_legend_is_drawn(self, gdf_departments):
+        pts = self._points(gdf_departments)
+        _, svg = self._render(pts, color_legend={"title": "Rate"})
+        texts = [t.text for t in svg.iter("{http://www.w3.org/2000/svg}text")]
+        assert "Rate" in texts
+
+    def test_colour_legend_can_be_hidden(self, gdf_departments):
+        pts = self._points(gdf_departments)
+        _, svg = self._render(pts, color_legend=False)
+        _, svg_with = self._render(pts, color_legend={"title": "Rate"})
+        n = len(list(svg.iter("{http://www.w3.org/2000/svg}rect")))
+        n_with = len(list(svg_with.iter("{http://www.w3.org/2000/svg}rect")))
+        assert n < n_with
+
+    def test_fill_column_and_color_column_exclusive(self, gdf_departments):
+        pts = self._points(gdf_departments)
+        pts["cat"] = "a"
+        with pytest.raises(ValueError, match="not both"):
+            Proportional(pts, column="pop", color_column="rate",
+                         fill_column="cat", fill_map={"a": "#000000"}).validate()
