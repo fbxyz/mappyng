@@ -73,6 +73,41 @@ Layer parameters
    * - ``legend``
      - ``None``
      - Legend sub-config dict.  See tables below.
+   * - ``fill_column``, ``fill_map``
+     - ``None``
+     - Colour circles by category (``fill_map`` maps category to colour).
+   * - ``color_column``
+     - ``None``
+     - Numeric column classified like a choropleth to colour the circles.
+       Circles without a value keep ``fill``, which also fills the size
+       legend.  Cannot be combined with ``fill_column``.
+   * - ``cmap``, ``method``, ``num_classes``, ``reverse``
+     - as in ``Choropleth``
+     - Classification of ``color_column``.
+   * - ``color_legend``
+     - ``None``
+     - Legend of the colour classes (same fields as the choropleth legend).
+       ``False`` hides it.
+
+Colouring circles by a second column
+------------------------------------
+
+Size the circles by a stock and colour them by a rate:
+
+.. code-block:: python
+
+   m.add(Proportional(
+       gdf,
+       column="population",
+       color_column="rate",
+       cmap="Greens",
+       method="FisherJenks",
+       num_classes=5,
+       color_legend=Legend("Rate (%)"),
+   ))
+
+After rendering, ``layer.report`` holds the classification report of the
+colour classes.
 
 Legend parameters (``legend`` sub-dict)
 ----------------------------------------
