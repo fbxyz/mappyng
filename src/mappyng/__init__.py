@@ -18,7 +18,7 @@ Example
 >>> m.render("map.svg")
 """
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 
 from . import defaults
 from .border_contrast import BorderContrast
