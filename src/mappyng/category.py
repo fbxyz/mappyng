@@ -44,6 +44,75 @@ from .legend import make_legend_config, record_legend, stack_legend
 from .renderer import SvgViewport
 
 
+def _assign_categories(data: gpd.GeoDataFrame, column: str,
+                       fill_map: dict[Any, str], default_fill: str | None,
+                       what: str, missing_to_default: bool = False) -> tuple:
+    """Give each row of *data* the index of its category in ``_class``.
+
+    *data* holds no missing value in *column*. Returns ``(data, categories,
+    colors, unmapped)``: the categories in legend order (the *fill_map*
+    keys, then ``"__default__"`` when values fall back to *default_fill*),
+    their colours and the values absent from *fill_map*. Without
+    *default_fill*, an unmapped value raises ``ValueError``. With
+    *missing_to_default*, missing values join the *default_fill* bucket
+    instead of being expected absent.
+    """
+    categories: list[Any] = list(fill_map.keys())
+    colors: list[str] = [fill_map[c] for c in categories]
+
+    unmapped = sorted(set(data[column].dropna().unique()) - set(categories),
+                      key=str)
+    has_missing = missing_to_default and bool(data[column].isna().any())
+    if unmapped or has_missing:
+        if default_fill is None:
+            raise ValueError(
+                f"{what}: {len(unmapped)} value(s) in column "
+                f"{column!r} have no entry in fill_map: {unmapped}. Add "
+                f"them to fill_map, or pass default_fill for a fallback "
+                f"colour."
+            )
+        categories = categories + ["__default__"]
+        colors = colors + [default_fill]
+
+    cat_index = {c: i for i, c in enumerate(categories)}
+    default_idx = cat_index.get("__default__")
+    data = data.copy()
+    data["_class"] = data[column].map(lambda v: cat_index.get(v, default_idx))
+    return data, categories, colors, unmapped
+
+
+def _category_report(data: gpd.GeoDataFrame, column: str,
+                     categories: list[Any], unmapped: list[Any],
+                     n_excluded: int) -> CategoryReport:
+    """Report of the categories assigned by :func:`_assign_categories`."""
+    counts = np.bincount(data["_class"].to_numpy(dtype=int),
+                         minlength=len(categories))
+    return CategoryReport(
+        column=column, categories=categories,
+        counts=[int(c) for c in counts], n_valid=len(data),
+        n_excluded=n_excluded, unmapped=unmapped,
+    )
+
+
+def _category_legend_config(map_obj, legend_params: Any,
+                            categories: list[Any], default_label: str,
+                            what: str) -> ChoroplethLegendConfig:
+    """Legend config with one swatch per category, vertical by default."""
+    if isinstance(legend_params, ChoroplethLegendConfig):
+        legend_cfg = copy.copy(legend_params)
+    else:
+        labels = [default_label if c == "__default__" else str(c)
+                  for c in categories]
+        merged: dict[str, Any] = {"orientation": "vertical",
+                                  "label_position": "center",
+                                  "labels": labels}
+        merged.update(legend_params or {})
+        legend_cfg = make_legend_config(ChoroplethLegendConfig, merged, what)
+    legend_cfg.resolve_defaults(
+        map_obj.style, font_scale=getattr(map_obj, "font_scale", 1.0))
+    return legend_cfg
+
+
 def add_category(
     map_obj,
     gdf: gpd.GeoDataFrame,
@@ -153,33 +222,10 @@ def add_category(
     nodata = gdf[gdf[column].isna()]
     data = gdf.dropna(subset=[column])
 
-    categories: list[Any] = list(fill_map.keys())
-    colors: list[str] = [fill_map[c] for c in categories]
-
-    unmapped = sorted(set(data[column].unique()) - set(categories), key=str)
-    if unmapped:
-        if default_fill is None:
-            raise ValueError(
-                f"Category: {len(unmapped)} value(s) in column "
-                f"{column!r} have no entry in fill_map: {unmapped}. Add "
-                f"them to fill_map, or pass default_fill for a fallback "
-                f"colour."
-            )
-        categories = categories + ["__default__"]
-        colors = colors + [default_fill]
-
-    cat_index = {c: i for i, c in enumerate(categories)}
-    default_idx = cat_index.get("__default__")
-    data = data.copy()
-    data["_class"] = data[column].map(lambda v: cat_index.get(v, default_idx))
-
-    counts = np.bincount(data["_class"].to_numpy(dtype=int),
-                         minlength=len(categories))
-    map_obj._state.classification_reports[layer_id] = CategoryReport(
-        column=column, categories=categories,
-        counts=[int(c) for c in counts], n_valid=len(data),
-        n_excluded=len(nodata), unmapped=unmapped,
-    )
+    data, categories, colors, unmapped = _assign_categories(
+        data, column, fill_map, default_fill, "Category")
+    map_obj._state.classification_reports[layer_id] = _category_report(
+        data, column, categories, unmapped, len(nodata))
 
     data, opacity_levels = _resolve_opacity_bins(data, opacity_column, opacity_bins)
 
@@ -217,23 +263,10 @@ def add_category(
             )
         return _detail_cache[id(finer)]
 
-    labels = [str(c) for c in categories]
-    if unmapped:
-        labels[-1] = default_label
-
     show_legend = legend_params is not False
-    if not show_legend:
-        legend_params = None
-    if isinstance(legend_params, ChoroplethLegendConfig):
-        legend_cfg = copy.copy(legend_params)
-    else:
-        merged: dict[str, Any] = {"orientation": "vertical",
-                                  "label_position": "center",
-                                  "labels": labels}
-        merged.update(legend_params or {})
-        legend_cfg = make_legend_config(
-            ChoroplethLegendConfig, merged, "Category legend")
-    legend_cfg.resolve_defaults(style, font_scale=getattr(map_obj, "font_scale", 1.0))
+    legend_cfg = _category_legend_config(
+        map_obj, None if legend_params is False else legend_params,
+        categories, default_label, "Category legend")
     bins = np.arange(len(colors) + 1, dtype=float)
 
     border_report: list = []

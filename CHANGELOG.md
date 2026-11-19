@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `Proportional(fill_column=..., fill_map=...)`: the category colours get their own legend (`color_legend`, one swatch per category, `default_label` for the circles left in `fill`) and a `CategoryReport` in `layer.report`, as a `Category` layer inside the circles.
+
+### Changed
+
+- `Proportional`: `fill_column` without `fill_map` (or the reverse) raises `ValueError` instead of being ignored.
+
 ## 1.1.0 (2026-11-18)
 
 ### Added

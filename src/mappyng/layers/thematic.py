@@ -556,8 +556,13 @@ class Proportional(Layer):
         circle individually so a single layer can mix colours while keeping the
         global "smallest on top" ordering (one layer per colour breaks it).
     fill_map : dict, optional
-        Mapping ``category -> colour`` used with *fill_column*; unmapped
-        categories fall back to *fill*.
+        Mapping ``category -> colour`` used with *fill_column* (required with
+        it); unmapped categories and missing values fall back to *fill*. The
+        categories get their own legend (*color_legend*), as in
+        :class:`Category`.
+    default_label : str, optional
+        Legend label of the circles left in *fill* by *fill_column*
+        (default ``"Autre"``).
     color_column : str, optional
         Numeric column classified like a :class:`Choropleth` to colour each
         circle with its class colour, e.g. a rate inside circles sized by a
@@ -572,7 +577,8 @@ class Proportional(Layer):
     num_classes : int, optional
         Number of classes of *color_column* (default 5).
     color_legend : dict or False, optional
-        Legend of the colour classes (see :class:`ChoroplethLegendConfig`).
+        Legend of the colours: the *color_column* classes or the
+        *fill_column* categories (see :class:`ChoroplethLegendConfig`).
         ``False`` draws no colour legend.
     detail : GeoDataFrame or dict, optional
         Finer geometry for the zoom window and the cartouches, used to
@@ -594,14 +600,17 @@ class Proportional(Layer):
     --------
     >>> m.add(Proportional(gdf, column="population", max_radius=30))
     >>> m.add(Proportional(gdf, column="n", fill_column="type",
-    ...                         fill_map={"a": "#6A1B9A", "b": "#78909C"}))
+    ...                    fill_map={"a": "#6A1B9A", "b": "#78909C"},
+    ...                    color_legend=Legend("Type")))
     >>> m.add(Proportional(gdf, column="population", color_column="rate",
     ...                    cmap="Greens", method="FisherJenks",
     ...                    color_legend=Legend("Rate (%)")))
     """
 
-    #: :class:`~mappyng.choropleth_classify.ClassificationReport` of the
-    #: *color_column* classes after render; ``None`` without *color_column*.
+    #: After render, :class:`~mappyng.choropleth_classify.ClassificationReport`
+    #: of the *color_column* classes or
+    #: :class:`~mappyng.choropleth_classify.CategoryReport` of the
+    #: *fill_column* categories; ``None`` with a single *fill*.
     report = None
 
     kind = "proportional"
@@ -626,6 +635,7 @@ class Proportional(Layer):
         detail_join: Any = _UNSET,
         fill_column: Any = _UNSET,
         fill_map: Any = _UNSET,
+        default_label: Any = _UNSET,
         color_column: Any = _UNSET,
         cmap: Any = _UNSET,
         reverse: Any = _UNSET,
@@ -644,7 +654,7 @@ class Proportional(Layer):
                 reference_radius=reference_radius, legend=legend,
                 on_zoom=on_zoom, on_cartouches=on_cartouches,
                 fill_column=fill_column, fill_map=fill_map,
-                color_column=color_column, cmap=cmap, reverse=reverse,
+                default_label=default_label, color_column=color_column, cmap=cmap, reverse=reverse,
                 method=method, num_classes=num_classes,
                 color_legend=color_legend,
                 detail=detail, detail_join=detail_join,
@@ -661,6 +671,12 @@ class Proportional(Layer):
         _require_column(self, self.params["column"])
         _require_column(self, self.params.get("fill_column"), "fill_column")
         _require_column(self, self.params.get("color_column"), "color_column")
+        if (self.params.get("fill_column") is None) != (
+                self.params.get("fill_map") is None):
+            raise ValueError(
+                "Proportional: fill_column and fill_map go together, e.g. "
+                "Proportional(gdf, column='n', fill_column='type', "
+                "fill_map={'a': '#1f78b4', 'b': '#33a02c'}).")
         if (self.params.get("color_column") is not None
                 and self.params.get("fill_column") is not None):
             raise ValueError(
@@ -688,6 +704,7 @@ class Proportional(Layer):
             detail_join=cfg.pop("detail_join", None),
             fill_column=cfg.pop("fill_column", None),
             fill_map=cfg.pop("fill_map", None),
+            default_label=cfg.pop("default_label", "Autre"),
             color_column=cfg.pop("color_column", None),
             cmap=cfg.pop("cmap", D.CHOROPLETH_DEFAULT_CMAP),
             reverse=cfg.pop("reverse", False),

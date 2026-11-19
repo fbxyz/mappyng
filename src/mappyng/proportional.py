@@ -514,6 +514,7 @@ def add_proportional(
     on_cartouches: bool = True,
     fill_column: str | None = None,
     fill_map: dict[Any, str] | None = None,
+    default_label: str = "Autre",
     color_column: str | None = None,
     cmap: str | list[str] = D.CHOROPLETH_DEFAULT_CMAP,
     reverse: bool = False,
@@ -563,7 +564,10 @@ def add_proportional(
         into one layer per colour breaks that ordering).
     fill_map : dict, optional
         Mapping ``category -> colour`` used with *fill_column*. Categories absent
-        from the mapping fall back to *fill*.
+        from the mapping, and missing values, fall back to *fill*.
+    default_label : str
+        Legend label of the circles left in *fill* by *fill_column*
+        (default ``"Autre"``).
     color_column : str, optional
         Numeric column classified like a choropleth (*method*, *num_classes*)
         to colour each circle with its class colour from *cmap*. Circles
@@ -572,7 +576,8 @@ def add_proportional(
         Classification of *color_column*, as in
         :func:`~mappyng.choropleth.add_choropleth`.
     color_legend : dict or False, optional
-        Legend of the colour classes (see ChoroplethLegendConfig fields).
+        Legend of the colours, of the *color_column* classes or of the
+        *fill_column* categories (see ChoroplethLegendConfig fields).
         ``False`` draws no colour legend.
     detail : GeoDataFrame or dict, optional
         Finer geometry for the zoom window and the cartouches: the circles
@@ -596,12 +601,16 @@ def add_proportional(
 
     # Categorical colouring: resolve a per-circle fill column carried by `data`
     # (survives clipping/cartouche subsetting) and read back in _draw_circles.
+    color_classes = None
     if fill_column is not None and fill_map is not None:
-        data[_FILL_COL] = data[fill_column].map(fill_map).fillna(fill)
+        color_classes = _categorize_colors(
+            map_obj, layer_id, data, fill_column, fill_map, fill,
+            default_label, color_legend)
+        classified, colors = color_classes[0], color_classes[1]
+        data[_FILL_COL] = [colors[int(c)] for c in classified["_class"]]
 
     # Choropleth colouring: classify color_column and give each circle the
     # colour of its class. Same classification as a Choropleth layer.
-    color_classes = None
     if color_column is not None:
         color_classes = _classify_colors(
             map_obj, layer_id, data, color_column, cmap, reverse, method,
@@ -712,11 +721,12 @@ def add_proportional(
 
     if color_classes is not None and color_legend is not False:
         classified, colors, bins, nodata, color_cfg = color_classes
+        values = (None if color_column is None
+                  else classified[color_column].to_numpy(dtype=float))
         stacked = stack_legend(map_obj, color_cfg)
         record_legend(map_obj, stacked, _draw_choropleth_legend(
             map_obj.svg, colors, bins, color_cfg, not nodata.empty,
-            map_obj.main, map_obj,
-            values=classified[color_column].to_numpy(dtype=float)))
+            map_obj.main, map_obj, values=values))
 
     return layer_id
 
@@ -758,3 +768,31 @@ def _classify_colors(map_obj, layer_id: int, data: gpd.GeoDataFrame,
         column, method, num_classes, k, classified, nodata, bins, [],
         cmap=cmap, colors=colors)
     return classified, colors, bins, nodata, legend_cfg
+
+
+def _categorize_colors(map_obj, layer_id: int, data: gpd.GeoDataFrame,
+                       column: str, fill_map: dict[Any, str], fill: str,
+                       default_label: str, legend_params: Any) -> tuple:
+    """Assign the *fill_map* categories of *column*, as a Category would.
+
+    Unmapped and missing values take *fill*, under *default_label*. Records
+    the category report under *layer_id* and returns
+    ``(classified, colors, bins, nodata, legend_config)`` like
+    :func:`_classify_colors`.
+    """
+    from .category import (
+        _assign_categories,
+        _category_legend_config,
+        _category_report,
+    )
+
+    classified, categories, colors, unmapped = _assign_categories(
+        data, column, fill_map, fill, "Proportional",
+        missing_to_default=True)
+    map_obj._state.classification_reports[layer_id] = _category_report(
+        classified, column, categories, unmapped, 0)
+    legend_cfg = _category_legend_config(
+        map_obj, None if legend_params is False else legend_params,
+        categories, default_label, "Proportional colour legend")
+    bins = np.arange(len(colors) + 1, dtype=float)
+    return classified, colors, bins, data.iloc[:0], legend_cfg

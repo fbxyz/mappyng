@@ -288,3 +288,60 @@ class TestColorColumn:
         with pytest.raises(ValueError, match="not both"):
             Proportional(pts, column="pop", color_column="rate",
                          fill_column="cat", fill_map={"a": "#000000"}).validate()
+
+
+# ============================================================================
+# Category colours (fill_column)
+# ============================================================================
+
+class TestFillColumnCategories:
+    FILL_MAP = {"a": "#1b9e77", "b": "#d95f02"}
+
+    @staticmethod
+    def _points(gdf_departments):
+        pts = _make_point_gdf(gdf_departments)
+        pts["pop"] = np.linspace(100_000, 1_000_000, len(pts))
+        pts["cat"] = ["a", "b", "c"] * (len(pts) // 3) + ["a"] * (len(pts) % 3)
+        pts.loc[pts.index[0], "cat"] = None
+        return pts
+
+    def _render(self, pts, **kwargs):
+        with Map(pts, width=800, height=600) as m:
+            layer = Proportional(pts, column="pop", fill_column="cat",
+                                 fill_map=self.FILL_MAP, fill="#cccccc",
+                                 **kwargs)
+            m.add(layer)
+        return layer, ET.fromstring(m.to_string())
+
+    @staticmethod
+    def _texts(svg):
+        return [t.text for t in svg.iter("{http://www.w3.org/2000/svg}text")]
+
+    def test_circles_take_their_category_colour(self, gdf_departments):
+        pts = self._points(gdf_departments)
+        _, svg = self._render(pts)
+        fills = TestColorColumn._circle_fills(svg)
+        for idx, fill in fills.items():
+            assert fill == self.FILL_MAP.get(pts.loc[idx, "cat"], "#cccccc")
+
+    def test_category_legend_and_report(self, gdf_departments):
+        pts = self._points(gdf_departments)
+        layer, svg = self._render(
+            pts, color_legend={"title": "Type"}, default_label="Other")
+        texts = self._texts(svg)
+        for label in ("Type", "a", "b", "Other"):
+            assert label in texts
+        report = layer.report
+        assert report.categories == ["a", "b", "__default__"]
+        assert report.unmapped == ["c"]
+        assert sum(report.counts) == len(pts)
+
+    def test_category_legend_can_be_hidden(self, gdf_departments):
+        pts = self._points(gdf_departments)
+        _, svg = self._render(pts, color_legend=False, default_label="Other")
+        assert "Other" not in self._texts(svg)
+
+    def test_fill_column_needs_fill_map(self, gdf_departments):
+        pts = self._points(gdf_departments)
+        with pytest.raises(ValueError, match="go together"):
+            Proportional(pts, column="pop", fill_column="cat").validate()
