@@ -75,7 +75,12 @@ Layer parameters
      - Legend sub-config dict.  See tables below.
    * - ``fill_column``, ``fill_map``
      - ``None``
-     - Colour circles by category (``fill_map`` maps category to colour).
+     - Colour circles by category (``fill_map`` maps category to colour,
+       required with ``fill_column``).  Unmapped categories and missing
+       values keep ``fill``.
+   * - ``default_label``
+     - ``"Autre"``
+     - Legend label of the circles left in ``fill`` by ``fill_column``.
    * - ``color_column``
      - ``None``
      - Numeric column classified like a choropleth to colour the circles.
@@ -86,7 +91,8 @@ Layer parameters
      - Classification of ``color_column``.
    * - ``color_legend``
      - ``None``
-     - Legend of the colour classes (same fields as the choropleth legend).
+     - Legend of the colours, classes of ``color_column`` or categories of
+       ``fill_column`` (same fields as the choropleth legend).
        ``False`` hides it.
 
 Colouring circles by a second column
@@ -108,6 +114,25 @@ Size the circles by a stock and colour them by a rate:
 
 After rendering, ``layer.report`` holds the classification report of the
 colour classes.
+
+Colour the circles by category instead, as a :class:`~mappyng.Category`
+layer would:
+
+.. code-block:: python
+
+   m.add(Proportional(
+       gdf,
+       column="population",
+       fill_column="type",
+       fill_map={"Rural": "#1b9e77", "Urban": "#d95f02", "Mixed": "#7570b3"},
+       fill="#bbbbbb",
+       default_label="Other",
+       color_legend=Legend("Type of area"),
+   ))
+
+Categories missing from ``fill_map`` and missing values keep ``fill`` and
+appear in the legend under ``default_label``.  ``layer.report`` is then a
+:class:`~mappyng.choropleth_classify.CategoryReport` (circles per category).
 
 Legend parameters (``legend`` sub-dict)
 ----------------------------------------
